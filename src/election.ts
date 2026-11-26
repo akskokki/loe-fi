@@ -81,8 +81,12 @@ export class Election {
         });
       }
     } else if (type === 'COORDINATOR') {
-      if (this.reference === me && from < me) {
+      const current = this.reference;
+      if (current === me && from < me) {
         this.announce(); // e.g. after a network split healed: tell the lower one to step down
+      } else if (current !== null && from < current && this.d.liveMembers().includes(current)) {
+        // We already follow a live, higher reference. Its own announcements make the lower one
+        // step down; switching to the lower one would only make the followers flip back and forth.
       } else if (from > me || !this.d.canLead()) {
         this.clearTimers();
         this.phase = 'idle';
