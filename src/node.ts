@@ -15,7 +15,6 @@ import { describeChanges } from './describe.js';
 const SEND_INTERVAL_MS = 1000;
 const PEER_TIMEOUT_MS = 5000;
 const RETRY_GONE_EVERY = 5; // also send to gone members on every 5th tick, so a healed network split reconnects
-const LARGE_MESSAGE_BYTES = 8000; // macOS refuses to send UDP datagrams over 9216 bytes by default
 
 export type MemberStatus = 'me' | 'alive' | 'gone' | 'not heard from';
 export type MemberView = { id: NodeId; address: string | null; port: number; heartbeat: number; status: MemberStatus; seenMsAgo?: number };
@@ -151,7 +150,6 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
   private send(msg: Msg, to: Address) {
     if (this.offline()) return;
     const data = JSON.stringify(msg);
-    if (data.length > LARGE_MESSAGE_BYTES) this.log(`warning: ${msg.type} is ${data.length} bytes, may not fit in one datagram`);
     if (this.opts.verbose) this.log(`-> ${msg.type} to ${to.address}:${to.port} (${data.length} bytes)`);
     this.sock.send(data, to.port, to.address, (err) => {
       if (err) this.log(`send to ${to.address}:${to.port} failed: ${err.message}`);
