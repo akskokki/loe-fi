@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  addTrack, emptyState, heartbeat, isState, isValidName, memberName, merge, playheadAt, setSteps, setTrackStatus, stepDurationMs,
+  addTrack, emptyState, fingerprint, heartbeat, isState, isValidName, memberName, merge, playheadAt, setSteps, setTrackStatus, stepDurationMs,
   toggleCell, updatePlayback, type NodeId, type State, type TrackStatus,
 } from './state.js';
 
@@ -172,4 +172,16 @@ test('a tempo change keeps the playhead where it is', () => {
   s = updatePlayback(s, A, 1000, { bpm: 60 });
   assert.equal(playheadAt(s, 1000), before);
   assert.equal(playheadAt(s, 1000 + stepDurationMs(60)), (before + 1) % 16);
+});
+
+// --- Fingerprint ---
+
+test('fingerprint ignores key order and heartbeats, but not content', () => {
+  const a = heartbeat(toggleCell(addTrack(emptyState(), A, 'kick', 'kick.wav'), A, 'kick', 1), A, member(7051));
+  const viaNetwork = JSON.parse(JSON.stringify(a));
+  const reordered = { members: viaNetwork.members, tracks: viaNetwork.tracks, playback: viaNetwork.playback, settings: viaNetwork.settings };
+  assert.equal(fingerprint(reordered), fingerprint(a));
+  assert.equal(fingerprint(heartbeat(a, A, member(7051))), fingerprint(a)); // only the heartbeat moved
+  assert.notEqual(fingerprint(toggleCell(a, B, 'kick', 2)), fingerprint(a));
+  assert.notEqual(fingerprint(heartbeat(a, B, member(7052))), fingerprint(a)); // a new member
 });
