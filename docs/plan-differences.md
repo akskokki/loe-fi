@@ -2,7 +2,7 @@
 
 Where the implementation does something other than [the design plan](design-plan.tex) describes. Keep this updated as the code changes, so the final report can explain what changed and why.
 
-Parts of the plan that are simply not built yet (clock sync, election, file sharing, audio) are not listed here. Only deliberate departures are.
+Parts of the plan that are simply not built yet (audio) are not listed here. Only deliberate departures are.
 
 Status: **proposed** means it's in the code but the group hasn't confirmed it yet. **Agreed** means the group has accepted it (update the plan text then too).
 
@@ -76,6 +76,15 @@ Status: **proposed** means it's in the code but the group hasn't confirmed it ye
 - **Plan:** doesn't say whether nodes keep sending to members they consider gone.
 - **Code:** STATE goes to live members every second, and also to gone members every 5th second.
 - **Why:** without this, two sides of a network split that have written each other off never contact each other again, and the session stays split after the network heals.
+
+## File sharing
+
+### Preset sounds instead of file sharing · agreed
+
+- **Plan:** members add their own sample files. A track is identified by the hash of its sample, each member lists the samples it holds, and a node missing a sample pulls it from another member over TCP.
+- **Decision:** the program ships with a set of preset sounds and there is no file sharing. Every node already has every sound, so no sample is ever transferred.
+- **Consequences for the code (to do):** tracks will be identified by preset name instead of a hash, the `samples` list in member entries and the planned file request message go away, and adding a track means picking a preset.
+- **Why:** the group decided to focus on the shared state and the synchronized playback.
 
 ## Playhead synchronization
 
