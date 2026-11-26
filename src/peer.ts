@@ -42,7 +42,7 @@ let myAddress: string | null = null;
 /** Where packets from each node actually came from. Preferred over the address in its member entry. */
 const observed = new Map<NodeId, Address>();
 /** When each member's heartbeat last increased, decided locally. */
-const liveness = new Map<NodeId, { ver: number; changedAt: number; alive: boolean }>();
+const liveness = new Map<NodeId, { ver: number; changedAt: number; alive: boolean; everAlive: boolean }>();
 const joinTarget: Address | undefined = args.join
   ? { address: args.join.split(':')[0], port: Number(args.join.split(':')[1] ?? 7051) }
   : undefined;
@@ -106,11 +106,12 @@ function updateLiveness(now: number) {
     const known = liveness.get(id);
     const where = `${entry.value.address ?? '?'}:${entry.value.port}`;
     if (!known) {
-      liveness.set(id, { ver, changedAt: now, alive: true });
-      log(`+ member ${id} (${where})`);
+      // Seeing an entry proves nothing: member entries are never removed, so this may be a peer
+      // that quit long ago, e.g. our own previous run on this machine. Wait for its heartbeat to move.
+      liveness.set(id, { ver, changedAt: now, alive: false, everAlive: false });
     } else if (ver > known.ver) {
-      if (!known.alive) log(`+ member ${id} (${where}) is back`);
-      liveness.set(id, { ver, changedAt: now, alive: true });
+      if (!known.alive) log(`+ member ${id} (${where})${known.everAlive ? ' is back' : ''}`);
+      liveness.set(id, { ver, changedAt: now, alive: true, everAlive: true });
     } else if (known.alive && now - known.changedAt > PEER_TIMEOUT_MS) {
       known.alive = false;
       log(`- member ${id} (${where}) timed out`);
@@ -183,7 +184,8 @@ function showMembers(now: number) {
   for (const [key, entry] of Object.entries(state.members)) {
     const id = Number(key);
     const where = `${entry.value.address ?? '?'}:${entry.value.port}`;
-    const status = id === ME ? 'me' : liveness.get(id)?.alive ? `alive, seen ${now - liveness.get(id)!.changedAt} ms ago` : 'gone';
+    const l = liveness.get(id);
+    const status = id === ME ? 'me' : l?.alive ? `alive, seen ${now - l.changedAt} ms ago` : l?.everAlive ? 'gone' : 'not heard from';
     console.log(`  member ${id} ${where} heartbeat ${entry.stamp.ver} (${status})`);
   }
 }
