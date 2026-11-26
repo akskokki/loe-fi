@@ -1,6 +1,6 @@
 # Lö-Fi
 
-Real-time multiplayer drum sequencer. Design: [docs/design-plan.tex](docs/design-plan.tex).
+Real-time multiplayer drum sequencer. Design: [docs/design-plan.tex](docs/design-plan.tex). Where the code departs from it: [docs/plan-differences.md](docs/plan-differences.md).
 
 ## Code
 
