@@ -33,7 +33,7 @@ test("every hit is heard exactly at its step's session time, once", async () => 
   s = updatePlayback(s, 1, at, { playing: true });
   s = { ...s, playback: { ...s.playback, value: { ...s.playback.value, at } } };
 
-  const engine = AudioEngine.withContext(ctx as any);
+  const engine = AudioEngine.withContext(ctx as unknown as Parameters<typeof AudioEngine.withContext>[0]);
   engine.start(() => s, now);
   await new Promise((r) => setTimeout(r, 1200));
   await engine.close();
@@ -44,7 +44,7 @@ test("every hit is heard exactly at its step's session time, once", async () => 
   const expected = [0, 2, 4, 6].map((step) => at + step * 125).filter((t) => t < now());
   assert.ok(expected.length >= 4);
   assert.equal(heard.length, expected.length, `heard ${heard.length} hits, expected ${expected.length}`);
-  heard.forEach((t, i) =>
-    assert.ok(Math.abs(t - expected[i]) < 1, `hit ${i} off by ${(t - expected[i]).toFixed(3)} ms`),
-  );
+  for (const [i, t] of heard.entries()) {
+    assert.ok(Math.abs(t - expected[i]) < 1, `hit ${i} off by ${(t - expected[i]).toFixed(3)} ms`);
+  }
 });

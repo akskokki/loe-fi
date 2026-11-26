@@ -24,7 +24,7 @@ export function HelpLine({ items }: { items: [string, string][] }) {
 export function labels(members: MemberView[]): Map<number, string> {
   const count = new Map<string, number>();
   for (const m of members) count.set(m.name, (count.get(m.name) ?? 0) + 1);
-  return new Map(members.map((m) => [m.id, count.get(m.name)! > 1 ? `${m.name} #${m.id}` : m.name]));
+  return new Map(members.map((m) => [m.id, (count.get(m.name) ?? 0) > 1 ? `${m.name} #${m.id}` : m.name]));
 }
 
 /** A row of per-step cells with a space after every fourth, matching stepAt(). */
@@ -32,6 +32,7 @@ export function StepRow({ steps, cell }: { steps: number; cell: (s: number) => R
   return (
     <>
       {Array.from({ length: steps }, (_, s) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: the step number is what identifies a column
         <Text key={s}>
           {cell(s)}
           {s % 4 === 3 ? ' ' : ''}

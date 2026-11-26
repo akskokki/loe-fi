@@ -1,6 +1,7 @@
 // Checks for state that comes from the network. This is the trust boundary: merge() assumes its
 // input has exactly the shape of State, so every incoming copy goes through isState() first, and
 // names that end up on the terminal must not carry control characters (escape sequences).
+// Everything here takes `unknown`, so the checks themselves are type-checked as they narrow it.
 import { isHash } from '../samples/hash.js';
 import { MAX_STEPS, type State } from './state.js';
 
@@ -20,50 +21,57 @@ export function isValidName(x: unknown): x is string {
   );
 }
 
-const isObj = (x: unknown): x is Record<string, any> => typeof x === 'object' && x !== null && !Array.isArray(x);
-const isStamp = (x: any) => isObj(x) && Number.isInteger(x.ver) && x.ver >= 0 && typeof x.node === 'number';
-const isReg = (x: any, isValue: (v: any) => boolean) => isObj(x) && isStamp(x.stamp) && isValue(x.value);
-const STATUSES = ['active', 'muted', 'deleted'];
+/** A plain object (not null, not an array), whose fields are still unchecked. */
+export const isObject = (x: unknown): x is Record<string, unknown> =>
+  typeof x === 'object' && x !== null && !Array.isArray(x);
 
-const isTrack = (t: any) =>
-  isObj(t) &&
-  isReg(t.name, isValidName) &&
-  isReg(t.status, (v) => STATUSES.includes(v)) &&
-  Array.isArray(t.cells) &&
-  t.cells.length === MAX_STEPS &&
-  t.cells.every((c: any) => isReg(c, (v) => typeof v === 'boolean'));
+const isWholeNumber = (x: unknown): x is number => typeof x === 'number' && Number.isInteger(x);
 
-const isMember = (m: any) =>
-  isReg(
-    m,
-    (v) =>
-      isObj(v) &&
-      isValidName(v.name) &&
-      (v.address === null || typeof v.address === 'string') &&
-      Number.isInteger(v.port) &&
-      Array.isArray(v.samples) &&
-      v.samples.every(isHash),
-  );
+const isStamp = (x: unknown) => isObject(x) && isWholeNumber(x.ver) && x.ver >= 0 && typeof x.node === 'number';
 
-const isPlayback = (p: any) =>
-  isObj(p) &&
-  typeof p.playing === 'boolean' &&
-  typeof p.bpm === 'number' &&
-  p.bpm > 0 &&
-  Number.isInteger(p.step) &&
-  p.step >= 0 &&
-  typeof p.at === 'number';
+/** A register: a value that passes `isValue`, with a version stamp. */
+const isRegister = (x: unknown, isValue: (value: unknown) => boolean) =>
+  isObject(x) && isStamp(x.stamp) && isValue(x.value);
+
+const TRACK_STATUSES: unknown[] = ['active', 'muted', 'deleted'];
+
+const isTrack = (track: unknown) =>
+  isObject(track) &&
+  isRegister(track.name, isValidName) &&
+  isRegister(track.status, (status) => TRACK_STATUSES.includes(status)) &&
+  Array.isArray(track.cells) &&
+  track.cells.length === MAX_STEPS &&
+  track.cells.every((cell: unknown) => isRegister(cell, (on) => typeof on === 'boolean'));
+
+const isMemberInfo = (info: unknown) =>
+  isObject(info) &&
+  isValidName(info.name) &&
+  (info.address === null || typeof info.address === 'string') &&
+  isWholeNumber(info.port) &&
+  Array.isArray(info.samples) &&
+  info.samples.every(isHash);
+
+const isPlayback = (playback: unknown) =>
+  isObject(playback) &&
+  typeof playback.playing === 'boolean' &&
+  typeof playback.bpm === 'number' &&
+  playback.bpm > 0 &&
+  isWholeNumber(playback.step) &&
+  playback.step >= 0 &&
+  typeof playback.at === 'number';
+
+const isStepCount = (steps: unknown) => isWholeNumber(steps) && steps >= 1 && steps <= MAX_STEPS;
 
 /** True if x (e.g. parsed from a message) has exactly the shape merge() expects. Check before merging. */
 export function isState(x: unknown): x is State {
   return (
-    isObj(x) &&
-    isObj(x.settings) &&
-    isReg(x.settings.steps, (v) => Number.isInteger(v) && v >= 1 && v <= MAX_STEPS) &&
-    isReg(x.playback, isPlayback) &&
-    isObj(x.tracks) &&
+    isObject(x) &&
+    isObject(x.settings) &&
+    isRegister(x.settings.steps, isStepCount) &&
+    isRegister(x.playback, isPlayback) &&
+    isObject(x.tracks) &&
     Object.values(x.tracks).every(isTrack) &&
-    isObj(x.members) &&
-    Object.values(x.members).every(isMember)
+    isObject(x.members) &&
+    Object.values(x.members).every((member) => isRegister(member, isMemberInfo))
   );
 }

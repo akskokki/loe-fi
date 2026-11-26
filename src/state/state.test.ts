@@ -80,6 +80,7 @@ test('a network key "__proto__" does not change the prototype', () => {
 test('isState accepts real states and rejects broken ones', () => {
   const good = heartbeat(toggleCell(addTrack(emptyState(), A, 'kick', 'kick.wav'), A, 'kick', 1), A, member(7051));
   assert.ok(isState(JSON.parse(JSON.stringify(good))));
+  // biome-ignore lint/suspicious/noExplicitAny: the point is to break the shape in arbitrary ways
   const broken = (edit: (s: any) => void) => {
     const s = JSON.parse(JSON.stringify(good));
     edit(s);

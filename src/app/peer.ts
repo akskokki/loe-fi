@@ -95,71 +95,75 @@ function show() {
   }
 }
 
+/** A change to the state, as PeerNode.edit() takes it. */
+type Edit = (state: State, me: NodeId) => State;
+
+/** The change made by one of the commands that act on a track (t, mute, unmute, del). */
+function trackEdit(command: string, trackKey: string, args: string[]): Edit {
+  switch (command) {
+    case 't':
+      return (state, me) => parseSteps(args).reduce((acc, step) => toggleCell(acc, me, trackKey, step), state);
+    case 'mute':
+      return (state, me) => setTrackStatus(state, me, trackKey, 'muted');
+    case 'unmute':
+      return (state, me) => setTrackStatus(state, me, trackKey, 'active');
+    default:
+      return (state, me) => setTrackStatus(state, me, trackKey, 'deleted');
+  }
+}
+
+/** Runs one typed command. */
 function run(line: string) {
-  const [cmd, ...rest] = line.trim().split(/\s+/);
+  const [command, ...args] = line.trim().split(/\s+/);
   const now = node.now();
-  let change: ((s: State, me: NodeId) => State) | undefined;
-  // The track named in the command, for t, mute, unmute and del.
-  const track = () => {
-    const found = findTrack(node.state, rest[0] ?? '');
-    if ('error' in found) console.log(found.error);
-    return 'key' in found ? found.key : null;
-  };
-  let key: string | null;
-  switch (cmd) {
+  let change: Edit | undefined;
+  switch (command) {
     case '':
       return;
     case 'add': {
-      const arg = line.trim().slice(3).trim(); // a file path may contain spaces
-      if (isPreset(arg)) {
-        change = (s, me) => addTrack(s, me, presetKey(arg), arg);
+      const what = line.trim().slice(3).trim(); // a file path may contain spaces
+      if (isPreset(what)) {
+        change = (state, me) => addTrack(state, me, presetKey(what), what);
         break;
       }
-      if (!arg) return console.log(`add what? a preset (${PRESETS.join(', ')}) or a file`);
-      addSampleFile(node, arg).then(
+      if (!what) return console.log(`add what? a preset (${PRESETS.join(', ')}) or a file`);
+      addSampleFile(node, what).then(
         ({ note }) => note && console.log(`added, but ${note}`),
         (err: Error) => console.log(err.message),
       );
       return;
     }
     case 't':
-      if (!(key = track())) return;
-      change = (s, me) => parseSteps(rest.slice(1)).reduce((acc, step) => toggleCell(acc, me, key!, step), s);
-      break;
     case 'mute':
-      if (!(key = track())) return;
-      change = (s, me) => setTrackStatus(s, me, key!, 'muted');
-      break;
     case 'unmute':
-      if (!(key = track())) return;
-      change = (s, me) => setTrackStatus(s, me, key!, 'active');
+    case 'del': {
+      const found = findTrack(node.state, args[0] ?? '');
+      if ('error' in found) return console.log(found.error);
+      change = trackEdit(command, found.key, args.slice(1));
       break;
-    case 'del':
-      if (!(key = track())) return;
-      change = (s, me) => setTrackStatus(s, me, key!, 'deleted');
-      break;
+    }
     case 'play':
-      change = (s, me) => updatePlayback(s, me, now, { playing: true });
+      change = (state, me) => updatePlayback(state, me, now, { playing: true });
       break;
     case 'stop':
-      change = (s, me) => updatePlayback(s, me, now, { playing: false });
+      change = (state, me) => updatePlayback(state, me, now, { playing: false });
       break;
     case 'bpm':
-      if (Number(rest[0]) > 0) change = (s, me) => updatePlayback(s, me, now, { bpm: Number(rest[0]) });
+      if (Number(args[0]) > 0) change = (state, me) => updatePlayback(state, me, now, { bpm: Number(args[0]) });
       break;
     case 'steps':
-      if (Number(rest[0]) > 0) change = (s, me) => setSteps(s, me, Number(rest[0]));
+      if (Number(args[0]) > 0) change = (state, me) => setSteps(state, me, Number(args[0]));
       break;
     case 'show':
       return show();
     case 'offline':
-      return node.goOffline(Number(rest[0] || 10));
+      return node.goOffline(Number(args[0] || 10));
     case 'help':
       return console.log(HELP);
     case 'quit':
-      process.exit(0);
+      return process.exit(0);
     default:
-      return console.log(`unknown command "${cmd}", try help`);
+      return console.log(`unknown command "${command}", try help`);
   }
   if (!change || node.edit(change).length === 0) console.log('nothing changed (unknown track or step?)');
 }

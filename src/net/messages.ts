@@ -1,7 +1,7 @@
 // Messages between peer nodes over UDP. Each message is one JSON-encoded datagram. (Sample files
 // travel over TCP instead, with their own small protocol: samples/transfer.ts.)
 import type { NodeId, State } from '../state/state.js';
-import { isState } from '../state/validate.js';
+import { isObject, isState } from '../state/validate.js';
 
 export type Address = { address: string; port: number };
 
@@ -32,10 +32,10 @@ export type Msg =
  * Checks the shape of a parsed message, so a packet from an older version of this program (or
  * anything else) is reported instead of crashing the receiver or spreading through merge().
  */
-export function wellFormed(m: any): m is Msg {
-  if (typeof m !== 'object' || m === null || typeof m.from !== 'number') return false;
-  const num = (x: unknown) => typeof x === 'number' && Number.isFinite(x);
-  const hasTo = typeof m.to?.address === 'string' && Number.isInteger(m.to.port);
+export function wellFormed(m: unknown): m is Msg {
+  if (!isObject(m) || typeof m.from !== 'number') return false;
+  const isTime = (x: unknown) => typeof x === 'number' && Number.isFinite(x);
+  const hasTo = isObject(m.to) && typeof m.to.address === 'string' && Number.isInteger(m.to.port);
   switch (m.type) {
     case 'JOIN':
       return hasTo;
@@ -46,9 +46,9 @@ export function wellFormed(m: any): m is Msg {
     case 'COORDINATOR':
       return true;
     case 'TIME_REQUEST':
-      return num(m.t0);
+      return isTime(m.t0);
     case 'TIME_REPLY':
-      return num(m.t0) && num(m.t1) && num(m.t2);
+      return isTime(m.t0) && isTime(m.t1) && isTime(m.t2);
     default:
       return false;
   }

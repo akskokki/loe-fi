@@ -253,7 +253,7 @@ if (connectMs === null) {
   const timers = nodes.map((n) =>
     setInterval(() => {
       n.edit(randomEdit(n.now()));
-      edits.set(n, edits.get(n)! + 1);
+      edits.set(n, (edits.get(n) ?? 0) + 1);
     }, 1000 / RATE),
   );
 
@@ -300,8 +300,8 @@ if (connectMs === null) {
     );
   }
 
-  if (!failed && KILL_REFERENCE) {
-    const ref = nodes.find((n) => n.sync().iAmReference)!;
+  const ref = nodes.find((n) => n.sync().iAmReference);
+  if (!failed && KILL_REFERENCE && ref) {
     const survivors = nodes.filter((n) => n !== ref);
     const offsetsBefore = new Map(survivors.map((n) => [n, n.sync().offsetMs]));
     say(`stopping the time reference ${ref.opts.name}`);
@@ -312,17 +312,17 @@ if (connectMs === null) {
       say(`FAILED: the other peers did not agree on a new synced reference within ${CONVERGE_TIMEOUT_MS / 1000} s`);
       failed = true;
     } else {
-      const newRef = survivors.find((n) => n.sync().iAmReference)!;
-      const moved = Math.max(...survivors.map((n) => Math.abs(n.sync().offsetMs - offsetsBefore.get(n)!)));
+      const newRef = survivors.find((n) => n.sync().iAmReference)?.opts.name ?? '?';
+      const moved = Math.max(...survivors.map((n) => Math.abs(n.sync().offsetMs - (offsetsBefore.get(n) ?? 0))));
       say(
-        `RECOVERED ${recoverMs} ms after the reference stopped: ${newRef.opts.name} took over, ` +
+        `RECOVERED ${recoverMs} ms after the reference stopped: ${newRef} took over, ` +
           `and session time moved by at most ${moved.toFixed(2)} ms on any peer`,
       );
     }
   }
 }
 
-nodes.forEach((n) => n.stop());
+for (const n of nodes) n.stop();
 logFile.end();
 fs.rmSync(sampleRoot, { recursive: true, force: true });
 process.exit(failed ? 1 : 0);
