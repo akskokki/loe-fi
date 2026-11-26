@@ -38,7 +38,7 @@ Status: **proposed** means it's in the code but the group hasn't confirmed it ye
 ### Member entries are never removed · proposed
 
 - **Plan:** "the other nodes consider that member gone". The plan doesn't say what happens to the entry.
-- **Code:** entries stay in the state forever. Each node decides locally that a member is gone when its heartbeat has not increased for 5 s (`src/net/node.ts`). A member counts as alive only after its heartbeat has been seen increasing, so entries of peers that quit long ago, such as a restarted node's previous run, stay silent.
+- **Code:** entries stay in the state forever. Each node decides locally that a member is gone when its heartbeat has not increased for 5 s (`src/net/membership.ts`). A member counts as alive only after its heartbeat has been seen increasing, so entries of peers that quit long ago, such as a restarted node's previous run, stay silent.
 - **Why:** if a node deleted an entry, the next STATE from any node that still had it would bring it back. Real removal would need tombstones or every node remembering which IDs it dropped.
 - **Cost:** the members list grows with every restart.
 

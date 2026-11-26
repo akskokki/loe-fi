@@ -5,6 +5,7 @@ import {
   toggleCell, updatePlayback, type NodeId, type State, type TrackStatus,
 } from './state.js';
 import { isState, isValidName } from './validate.js';
+import { seededRandom } from '../tools/rng.js';
 
 const A = 1, B = 2, C = 3;
 const member = (port: number) => ({ name: `peer${port}`, address: '10.0.0.1', port, samples: [] });
@@ -93,15 +94,8 @@ test('memberName falls back to the node ID for an unknown member', () => {
 
 // --- Convergence: merge must be commutative, associative and idempotent ---
 
-// Small seeded random generator, so a failure can be reproduced.
-function rng(seed: number) {
-  return () => {
-    seed = (seed + 0x6d2b79f5) | 0;
-    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 2 ** 32;
-  };
-}
+// Seeded, so a failure can be reproduced.
+const rng = seededRandom;
 
 const HASHES = ['kick', 'snare', 'hat'];
 const STATUSES: TrackStatus[] = ['active', 'muted', 'deleted'];
