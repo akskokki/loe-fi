@@ -79,12 +79,11 @@ Status: **proposed** means it's in the code but the group hasn't confirmed it ye
 
 ## File sharing
 
-### Preset sounds instead of file sharing · agreed
+### Built-in preset sounds next to file sharing · agreed
 
 - **Plan:** members add their own sample files. A track is identified by the hash of its sample, each member lists the samples it holds, and a node missing a sample pulls it from another member over TCP.
-- **Decision:** the program ships with a set of preset sounds and there is no file sharing. Every node already has every sound, so no sample is ever transferred.
-- **Code:** tracks are identified by preset name (`src/presets.ts`: kick, snare, hat, clap, tom) instead of a hash, member entries have no `samples` list, and there is no file request message. Adding a track means picking a preset. The sounds are synthesized when the program starts.
-- **Why:** the group decided to focus on the shared state and the synchronized playback.
+- **Decision:** file sharing stays as planned, and the program also comes with a few preset sounds, so someone starting it for the first time has sounds without any files. Presets need no transfer, since every node has them.
+- **Code so far:** only the presets exist (`src/presets.ts`: kick, snare, hat, clap, tom), and tracks are keyed by preset name. File sharing is not built yet; the `samples` list in member entries was removed for now and comes back with it.
 
 ## Playhead synchronization
 
