@@ -44,7 +44,7 @@ npm run ui -- --name alice --join 192.168.1.10:7051   # pick the name the others
 
 Members are shown by name. The name defaults to your OS user name and can be up to 16 characters. Both `npm run ui` and `npm run peer` take `--name`. If two members use the same name, the UI adds their node ID to tell them apart.
 
-The UI and the headless peer can be in the same session. Setup on each machine is the same as below. The UI needs a terminal with mouse reporting (most Linux and macOS terminals) and at least about 75 columns for 16 steps, or 120 for 32. The log goes to `logs/<node id>.log`, and its last lines are shown at the bottom of the screen.
+The UI and the headless peer can be in the same session. Setup on each machine is the same as below. The UI needs a terminal with mouse reporting (most Linux and macOS terminals) and at least about 75 columns for 16 steps, or 120 for 32. It needs about 25 rows plus one per track; in a shorter window it shows a message asking for a taller one instead of the grid. The log goes to `logs/<node id>.log`, and as many of its last lines as fit are shown at the bottom of the screen. The member list shows up to 6 members and sums up the rest in one line, fewer if the window is short.
 
 | Mouse | Keyboard | Action |
 |---|---|---|

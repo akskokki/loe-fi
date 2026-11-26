@@ -39,7 +39,8 @@ if ('error' in chosen) {
 
 // --- Log: to a file, and the last lines kept for the screen ---
 
-const LOG_LINES = 8;
+const LOG_LINES = 8; // at most; fewer when the terminal is short
+const MAX_MEMBERS_SHOWN = 6; // the rest are summed up in one line
 const logLines: string[] = [];
 const logListeners = new Set<() => void>();
 let logFile: fs.WriteStream | undefined;
@@ -233,6 +234,23 @@ function StepRow({ steps, cell }: { steps: number; cell: (s: number) => ReactNod
 function App() {
   const { exit } = useApp();
   const [, rerender] = useReducer((n: number) => n + 1, 0);
+
+  // Terminal height (Ink draws to process.stdout), kept up to date when the window is resized.
+  const [rows, setRows] = useState(process.stdout.rows || 24);
+  const tooSmall = useRef(false); // while the window is too short, the grid isn't drawn and clicks are ignored
+  useEffect(() => {
+    const onResize = () => {
+      // After a resize, Ink's in-place redraw would erase the wrong lines (it counts lines of the
+      // previous frame), so forget that frame, wipe the screen and draw the next frame from the top.
+      app.clear();
+      process.stdout.write('\x1b[2J\x1b[H');
+      setRows(process.stdout.rows || 24);
+    };
+    process.stdout.on('resize', onResize);
+    return () => {
+      process.stdout.off('resize', onResize);
+    };
+  }, []);
   const [cursor, setCursor] = useState({ track: 0, step: 0 });
   const [playhead, setPlayhead] = useState(0);
   const [adding, setAdding] = useState(false); // picking a preset for a new track
@@ -290,7 +308,7 @@ function App() {
   };
 
   useMouseClicks((x, y) => {
-    if (deleting !== null || filePath !== null) return; // answer the question or finish the path first
+    if (deleting !== null || filePath !== null || tooSmall.current) return; // answer the question or finish the path first
     const target = hitTest(x, y, controls, tracks.length, steps);
     if (target?.kind === 'action') run(target.action);
     else if (target?.kind === 'track') setCursor((c) => ({ ...c, track: target.track }));
@@ -352,12 +370,41 @@ function App() {
 
   const reachable = node.myAddress ?? localAddresses().find((a) => !a.startsWith('127.')) ?? '127.0.0.1';
   const sync = node.sync();
-  const members = node.members().filter((m) => m.status !== 'not heard from');
+  const order = { me: 0, alive: 1, gone: 2, 'not heard from': 3 };
+  const members = node.members()
+    .filter((m) => m.status !== 'not heard from')
+    .sort((a, b) => order[a.status] - order[b.status] || a.name.localeCompare(b.name));
   const hidden = node.members().length - members.length;
   const label = labels(members);
+  // Ink can only redraw in place while the whole UI fits in the terminal, so the parts below the
+  // grid get the space that is left: the log shrinks and disappears first, then the member list
+  // (down to this node plus an "… and N more" line), and anything else is clipped at the bottom.
+  const top = PAD + TRACKS_ROW + Math.max(1, tracks.length) + 1 + 3; // through the grid, playhead row and help
+  const memberRoom = rows - 1 - top - PAD - 4 - (hidden > 0 ? 1 : 0); // 4: blank, "Members", clock, audio
+  let showCount = Math.min(members.length, MAX_MEMBERS_SHOWN, Math.max(1, memberRoom));
+  if (showCount < members.length) showCount = Math.max(1, Math.min(showCount, memberRoom - 1)); // room for "… and N more"
+  const shownMembers = members.slice(0, showCount);
+  const moreMembers = members.length - shownMembers.length;
+  const linesAboveLog = top + 2 + shownMembers.length + (moreMembers > 0 ? 1 : 0) + 2 + (hidden > 0 ? 1 : 0);
+  const logRoom = Math.min(LOG_LINES, rows - 1 - linesAboveLog - 2 - PAD); // 2: blank line and "Log" title
+  const shownLog = logRoom > 0 ? logLines.slice(-logRoom) : [];
+
+  // Too short even for the grid and one member line: drawing anyway would scroll and garble the
+  // terminal, so ask for a taller window instead (the grid comes back as soon as it fits).
+  const needed = linesAboveLog + PAD + 1;
+  tooSmall.current = rows < needed;
+  if (tooSmall.current) {
+    return (
+      <Box padding={PAD}>
+        <Text color="yellow" wrap="truncate-end">
+          The window is too short for Lö-Fi: make it at least {needed} rows tall (now {rows}).
+        </Text>
+      </Box>
+    );
+  }
 
   return (
-    <Box flexDirection="column" padding={PAD}>
+    <Box flexDirection="column" padding={PAD} height={rows - 1} overflow="hidden">
       {BANNER.map((line, i) => (
         <Text key={i} color={BANNER_COLORS[i]} wrap="truncate-end">
           {line}
@@ -451,13 +498,18 @@ function App() {
 
       <Box marginTop={1} flexDirection="column">
         <Text bold>Members</Text>
-        {members.map((m) => (
+        {shownMembers.map((m) => (
           <Text key={m.id} wrap="truncate-end">
             <Text color={m.status === 'gone' ? 'red' : 'green'}>{m.status === 'gone' ? '○' : '●'}</Text> {label.get(m.id)}{' '}
             <Text dimColor>{m.status === 'me' ? '(me)' : m.status === 'gone' ? '(gone)' : ''}</Text>
             {m.id === sync.reference && <Text color="yellow"> time reference</Text>}
           </Text>
         ))}
+        {moreMembers > 0 && (
+          <Text dimColor>
+            … and {moreMembers} more ({members.slice(showCount).filter((m) => m.status === 'alive').length} alive)
+          </Text>
+        )}
         <Text dimColor wrap="truncate-end">
           {sync.iAmReference
             ? 'Clock: this node is the time reference'
@@ -474,16 +526,18 @@ function App() {
         {hidden > 0 && <Text dimColor>{hidden} earlier member(s) not heard from</Text>}
       </Box>
 
-      <Box marginTop={1} flexDirection="column">
-        <Text bold>
-          Log <Text dimColor>({logPath()})</Text>
-        </Text>
-        {logLines.map((l, i) => (
-          <Text key={i} dimColor wrap="truncate-end">
-            {l}
+      {shownLog.length > 0 && (
+        <Box marginTop={1} flexDirection="column">
+          <Text bold wrap="truncate-end">
+            Log <Text dimColor>({logPath()})</Text>
           </Text>
-        ))}
-      </Box>
+          {shownLog.map((l, i) => (
+            <Text key={i} dimColor wrap="truncate-end">
+              {l}
+            </Text>
+          ))}
+        </Box>
+      )}
     </Box>
   );
 }
