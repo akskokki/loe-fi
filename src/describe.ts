@@ -23,11 +23,29 @@ export function describeChanges(before: State, after: State): string[] {
       continue;
     }
     if (track.status !== old.status) out.push(`track ${name} ${track.status.value} ${by(track.status.stamp)}`);
+    // One line per (on/off, author) instead of one per step, e.g. `kick steps 1-4, 9 on (by 2)`.
+    const groups = new Map<string, number[]>();
     track.cells.forEach((cell, i) => {
-      if (cell !== old.cells[i]) out.push(`${name} step ${i + 1} ${cell.value ? 'on' : 'off'} ${by(cell.stamp)}`);
+      if (cell === old.cells[i]) return;
+      const key = `${cell.value ? 'on' : 'off'} ${by(cell.stamp)}`;
+      groups.set(key, [...(groups.get(key) ?? []), i + 1]);
     });
+    for (const [key, nums] of groups) {
+      out.push(`${name} ${nums.length === 1 ? 'step' : 'steps'} ${ranges(nums)} ${key}`);
+    }
   }
   return out;
+}
+
+/** Sorted step numbers as text with consecutive runs collapsed, e.g. [1, 2, 3, 5] -> `1-3, 5`. */
+function ranges(nums: number[]): string {
+  const parts: string[] = [];
+  for (let i = 0; i < nums.length; i++) {
+    const start = nums[i];
+    while (nums[i + 1] === nums[i] + 1) i++;
+    parts.push(nums[i] === start ? `${start}` : `${start}-${nums[i]}`);
+  }
+  return parts.join(', ');
 }
 
 /** The grid as text, e.g. `kick   active  x... x... x... x...`, with a ^ under the playhead. */
