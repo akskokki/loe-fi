@@ -6,11 +6,14 @@
 //   add --name alice to show a name to the others (default: your OS user name)
 //   add --verbose to log every STATE message sent and received
 //   add --drop 0.3 to throw away 30% of received packets (a lossy network)
+//   add --audio to play the grid (the UI plays it by default)
 import readline from 'node:readline';
 import { parseArgs } from 'node:util';
 import { PeerNode, chooseName, localAddresses, parseAddress } from './node.js';
 import { MAX_STEPS, addTrack, fingerprint, setSteps, setTrackStatus, toggleCell, updatePlayback, type NodeId, type State } from './state.js';
 import { renderGrid } from './describe.js';
+import { PRESETS, isPreset } from './presets.js';
+import { AudioEngine } from './audio.js';
 
 const { values: args } = parseArgs({
   options: {
@@ -19,6 +22,7 @@ const { values: args } = parseArgs({
     name: { type: 'string' },
     verbose: { type: 'boolean', default: false },
     drop: { type: 'string', default: '0' }, // share of received packets to throw away, e.g. 0.3
+    audio: { type: 'boolean', default: false }, // play the grid; off by default so peers on VMs need no sound setup
   },
 });
 
@@ -38,7 +42,7 @@ const node: PeerNode = new PeerNode({
 });
 
 const HELP = `commands:
-  add <name>           add a track (e.g. add kick)
+  add <sound>          add a track: ${PRESETS.join(', ')}
   t <track> <steps>    toggle steps, counted from 1 (e.g. t kick 1, t hihat 1 5 14, t snare 1-4)
   mute|unmute|del <track>
   play | stop | bpm <n> | steps <n>
@@ -82,7 +86,10 @@ function run(line: string) {
   let change: ((s: State, me: NodeId) => State) | undefined;
   switch (cmd) {
     case '': return;
-    case 'add': if (rest[0]) change = (s, me) => addTrack(s, me, rest[0], rest[0]); break;
+    case 'add':
+      if (!isPreset(rest[0] ?? '')) return console.log(`no sound called "${rest[0] ?? ''}"; choose one of: ${PRESETS.join(', ')}`);
+      change = (s, me) => addTrack(s, me, rest[0], rest[0]);
+      break;
     case 't': change = (s, me) => parseSteps(rest.slice(1)).reduce((acc, step) => toggleCell(acc, me, rest[0], step), s); break;
     case 'mute': change = (s, me) => setTrackStatus(s, me, rest[0], 'muted'); break;
     case 'unmute': change = (s, me) => setTrackStatus(s, me, rest[0], 'active'); break;
@@ -109,4 +116,13 @@ try {
 console.log(`${node.opts.name} listening on UDP port ${args.port}. Others can join with one of:`);
 for (const a of localAddresses()) console.log(`    --join ${a}:${args.port}`);
 console.log('type "help" for commands');
+if (args.audio) {
+  try {
+    const audio = await AudioEngine.open();
+    audio.start(() => node.state, () => node.now());
+    console.log(`audio on, output latency ${audio.latencyMs.toFixed(0)} ms`);
+  } catch (err) {
+    console.log(`audio off: ${(err as Error).message}`);
+  }
+}
 readline.createInterface({ input: process.stdin }).on('line', run).on('close', () => process.exit(0));

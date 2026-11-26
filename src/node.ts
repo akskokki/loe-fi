@@ -240,7 +240,7 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
   }
 
   private memberInfo() {
-    return { name: this.opts.name, address: this.myAddress, port: this.opts.port, samples: [] };
+    return { name: this.opts.name, address: this.myAddress, port: this.opts.port };
   }
 
   // --- Sending ---

@@ -15,7 +15,8 @@
 // - A member entry is a single register that only the member itself writes. Its version is the
 //   heartbeat. Entries are never removed (another copy would bring them back); whether a member is
 //   alive is decided locally from whether its version keeps increasing.
-// - Tracks are keyed by the sample's hash, so two tracks cannot use the same sample.
+// - Tracks are keyed by preset name (presets.ts) instead of a sample hash, so each preset can be
+//   used by one track at most.
 //
 // All functions are pure: they return a new state and never modify their arguments.
 
@@ -47,7 +48,7 @@ export type Playback = {
 export type TrackStatus = 'active' | 'muted' | 'deleted';
 
 export type Track = {
-  name: Reg<string>; // sample file name, for display
+  name: Reg<string>; // shown in the UI; the preset name for now
   status: Reg<TrackStatus>; // 'deleted' is a tombstone: the track stays so older copies can't bring it back
   cells: Reg<boolean>[]; // always MAX_STEPS long
 };
@@ -58,13 +59,12 @@ export type MemberInfo = {
   /** Address other nodes can reach this member at; null until the member has learned it (see messages.ts). */
   address: string | null;
   port: number;
-  samples: string[]; // hashes of the samples this member holds
 };
 
 export type State = {
   settings: Settings;
   playback: Reg<Playback>;
-  tracks: Record<string, Track>; // key: sample hash
+  tracks: Record<string, Track>; // key: preset name
   members: Record<string, Reg<MemberInfo>>; // key: node ID
 };
 
@@ -129,8 +129,7 @@ export function isValidName(x: unknown): x is string {
 }
 
 const isMember = (m: any) =>
-  isReg(m, (v) => isObj(v) && isValidName(v.name) && (v.address === null || typeof v.address === 'string') && Number.isInteger(v.port)
-    && Array.isArray(v.samples) && v.samples.every((h: unknown) => typeof h === 'string'));
+  isReg(m, (v) => isObj(v) && isValidName(v.name) && (v.address === null || typeof v.address === 'string') && Number.isInteger(v.port));
 
 const isPlayback = (p: any) =>
   isObj(p) && typeof p.playing === 'boolean' && typeof p.bpm === 'number' && p.bpm > 0
@@ -165,7 +164,7 @@ export function emptyState(): State {
   };
 }
 
-/** Add a track for a sample. Adding a sample whose track was deleted brings that track back with its old cells. */
+/** Add a track for a preset. Adding a preset whose track was deleted brings that track back with its old cells. */
 export function addTrack(s: State, me: NodeId, hash: string, name: string): State {
   if (getTrack(s, hash)) return setTrackStatus(s, me, hash, 'active');
   const track: Track = {

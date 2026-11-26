@@ -15,6 +15,8 @@ Real-time multiplayer drum sequencer. Design: [docs/design-plan.tex](docs/design
 | `src/state.test.ts` | Tests for the merge rule (`npm test`) |
 | `src/election.ts` | Bully election of the time reference |
 | `src/clock.ts` | Session time, synced to the time reference NTP-style |
+| `src/presets.ts` | The preset sounds (synthesized): kick, snare, hat, clap, tom |
+| `src/schedule.ts`, `src/audio.ts` | Which steps sound when, and the audio engine that plays them in session time |
 | `src/harness.ts` | Convergence test over the network code (`npm run harness`) |
 
 `npm test` runs the tests, `npm run check` type-checks.
@@ -49,16 +51,21 @@ The UI and the headless peer can be in the same session. Setup on each machine i
 | Play / Stop | `p` | Start or stop playback |
 | BPM `-` `+` | `-` `+` | Tempo down or up by 5 |
 | Steps `-` `+` | `[` `]` | Fewer or more steps |
-| Add track | `a`, type a name, Enter (Esc cancels) | Add a track |
+| Add track | `a`, then a number | Add a track with one of the preset sounds |
+| | `<` `>` | Volume down or up |
 | Mute | `m` | Mute or unmute the selected track |
 | Delete | `d` | Delete the selected track (adding the same name brings it back) |
 | Quit | `q` or Esc | Quit |
 
-There is no audio yet; the playhead only moves on screen. It follows session time: the peers elect the one with the highest node ID as time reference (bully algorithm) and the others sync their clocks to it, so the playhead is on the same step everywhere. The Members panel shows the reference and this peer's clock offset; `show` in the headless peer prints the same.
+The UI plays the grid. Playback follows session time: the peers elect the one with the highest node ID as time reference (bully algorithm) and the others sync their clocks to it, so every machine plays the same step at the same moment. Each machine's audio output latency is measured and corrected for. The Members panel shows the reference, this peer's clock offset and the audio status; `show` in the headless peer prints the clock part.
+
+The sounds are presets that come with the program (synthesized, no sample files), so nothing is sent between peers but the grid. Start with `--no-audio` to run silently.
+
+**Linux:** `node-web-audio-api` uses JACK. On a distro running PipeWire, install its JACK layer (`sudo apt install pipewire-jack`; Fedora usually has it). If audio still fails with `libjack.so.0: cannot open shared object file`, start through the wrapper: `pw-jack npm run ui`. The UI says `Audio: off (…)` and keeps working without sound if audio can't start. **macOS** needs no setup.
 
 ## Headless peer
 
-There is no audio yet. Every peer holds a copy of the session state and sends it to all live members after each change and once a second. Every peer merges what it receives using the version stamps. A peer that joins one member learns the others from the members in the state and connects to them too. A member whose heartbeat has not increased for 5 seconds is shown as gone.
+Silent unless started with `--audio`, so it runs on VMs without a sound setup. Every peer holds a copy of the session state and sends it to all live members after each change and once a second. Every peer merges what it receives using the version stamps. A peer that joins one member learns the others from the members in the state and connects to them too. A member whose heartbeat has not increased for 5 seconds is shown as gone.
 
 ### On every machine
 
@@ -99,7 +106,7 @@ Type these into a running peer:
 
 | Command | What it does |
 |---|---|
-| `add kick` | Add a track called kick |
+| `add kick` | Add a track with a preset sound: kick, snare, hat, clap or tom |
 | `t kick 1` | Toggle step 1 of kick (steps are counted from 1) |
 | `mute kick`, `unmute kick`, `del kick` | Change a track's status |
 | `play`, `stop`, `bpm 90`, `steps 8` | Playback and settings |

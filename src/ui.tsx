@@ -14,6 +14,8 @@ import { useEffect, useReducer, useRef, useState, type ReactNode } from 'react';
 import { render, Box, Text, useApp, useInput } from 'ink';
 import { PeerNode, chooseName, localAddresses, parseAddress, type MemberView } from './node.js';
 import { addTrack, playheadAt, setSteps, setTrackStatus, toggleCell, updatePlayback, type Track } from './state.js';
+import { PRESETS } from './presets.js';
+import { AudioEngine } from './audio.js';
 
 const { values: args } = parseArgs({
   options: {
@@ -22,6 +24,7 @@ const { values: args } = parseArgs({
     name: { type: 'string' },
     verbose: { type: 'boolean', default: false },
     drop: { type: 'string', default: '0' }, // share of received packets to throw away, e.g. 0.3
+    'no-audio': { type: 'boolean', default: false },
   },
 });
 
@@ -213,7 +216,7 @@ function App() {
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   const [cursor, setCursor] = useState({ track: 0, step: 0 });
   const [playhead, setPlayhead] = useState(0);
-  const [adding, setAdding] = useState<string | null>(null); // track name being typed, or null
+  const [adding, setAdding] = useState(false); // picking a preset for a new track
   const [deleting, setDeleting] = useState<string | null>(null); // hash of the track awaiting y/n, or null
 
   // Redraw when the state, a member's liveness or the log changes.
@@ -257,7 +260,7 @@ function App() {
       case 'bpmUp': node.edit((s, me) => updatePlayback(s, me, now, { bpm: Math.min(300, bpm + 5) })); break;
       case 'stepsDown': node.edit((s, me) => setSteps(s, me, steps - 1)); break;
       case 'stepsUp': node.edit((s, me) => setSteps(s, me, steps + 1)); break;
-      case 'add': setAdding(''); break;
+      case 'add': setAdding(true); break;
       case 'mute':
         if (selected) node.edit((s, me) => setTrackStatus(s, me, selected[0], selected[1].status.value === 'muted' ? 'active' : 'muted'));
         break;
@@ -283,14 +286,10 @@ function App() {
       setDeleting(null); // any other key cancels
       return;
     }
-    if (adding !== null) {
-      if (key.escape) setAdding(null);
-      else if (key.return) {
-        const name = adding.trim();
-        if (name) node.edit((s, me) => addTrack(s, me, name, name));
-        setAdding(null);
-      } else if (key.backspace || key.delete) setAdding(adding.slice(0, -1));
-      else if (/^[\w-]+$/.test(input) && adding.length + input.length <= 16) setAdding(adding + input);
+    if (adding) {
+      const preset = PRESETS[Number(input) - 1];
+      if (preset) node.edit((s, me) => addTrack(s, me, preset, preset));
+      setAdding(false); // a number picks a sound, any other key cancels
       return;
     }
     const n = Math.max(1, tracks.length);
@@ -307,6 +306,10 @@ function App() {
     else if (input === 'a') run('add');
     else if (input === 'm') run('mute');
     else if (input === 'd') run('delete');
+    else if ((input === '<' || input === '>') && audio) {
+      audio.setVolume(audio.volume + (input === '>' ? 0.1 : -0.1));
+      rerender();
+    }
     else if (input === 'q' || key.escape) run('quit');
   });
 
@@ -372,15 +375,23 @@ function App() {
           <Text>
             Delete track <Text color="red">{state.tracks[deleting]?.name.value}</Text>? <Text dimColor>(y/n)</Text>
           </Text>
-        ) : adding !== null ? (
-          <Text>
-            New track name: <Text color="cyan">{adding}</Text>
-            <Text inverse> </Text> <Text dimColor>(Enter to add, Esc to cancel)</Text>
+        ) : adding ? (
+          <Text wrap="truncate-end">
+            Add a sound:{' '}
+            {PRESETS.map((p, i) => {
+              const present = Object.hasOwn(state.tracks, p) && state.tracks[p].status.value !== 'deleted';
+              return (
+                <Text key={p}>
+                  <Text color="yellow" bold>{i + 1}</Text> <Text dimColor={present}>{p}</Text>{'  '}
+                </Text>
+              );
+            })}
+            <Text dimColor>(any other key cancels)</Text>
           </Text>
         ) : (
           <>
             <HelpLine items={[['click', 'cells and buttons'], ['arrows', 'move'], ['space', 'toggle'], ['m', 'mute'], ['d', 'delete']]} />
-            <HelpLine items={[['p', 'play/stop'], ['+/-', 'tempo'], ['[ ]', 'steps'], ['a', 'add track'], ['q', 'quit']]} />
+            <HelpLine items={[['p', 'play/stop'], ['+/-', 'tempo'], ['[ ]', 'steps'], ['a', 'add track'], ['< >', 'volume'], ['q', 'quit']]} />
           </>
         )}
       </Box>
@@ -401,6 +412,11 @@ function App() {
               ? 'Clock: no time reference yet'
               : `Clock: ${sync.synced ? 'synced' : 'syncing'} to ${sync.referenceName}, offset ${sync.offsetMs.toFixed(1)} ms`
                 + (sync.delayMs === null ? '' : `, round trip ${sync.delayMs.toFixed(1)} ms`)}
+        </Text>
+        <Text dimColor wrap="truncate-end">
+          {audio
+            ? `Audio: on, volume ${Math.round(audio.volume * 100)}%, output latency ${audio.latencyMs.toFixed(0)} ms (corrected for)`
+            : `Audio: off (${audioOff})`}
         </Text>
         {hidden > 0 && <Text dimColor>{hidden} earlier member(s) not heard from</Text>}
       </Box>
@@ -431,11 +447,26 @@ try {
 // Full-screen mode, entered by hand: switching to the alternate screen (?1049h) keeps the cursor
 // where it was, so also move it to the top-left (H) before Ink draws. Then row 1 of the terminal
 // is row 1 of the UI and the fixed layout matches the mouse coordinates.
+// Audio is optional: without it the grid still syncs, it just stays silent.
+let audio: AudioEngine | null = null;
+let audioOff = 'started with --no-audio';
+if (!args['no-audio']) {
+  try {
+    audio = await AudioEngine.open();
+    audio.start(() => node.state, () => node.now());
+    log('audio on');
+  } catch (err) {
+    audioOff = (err as Error).message;
+    log(`audio off: ${audioOff}`);
+  }
+}
+
 process.stdout.write('\x1b[?1049h\x1b[H');
 process.on('exit', () => process.stdout.write('\x1b[?1049l'));
 
 const app = render(<App />);
 await app.waitUntilExit();
+await audio?.close();
 node.stop();
 logFile?.end();
 process.exit(0);

@@ -2,7 +2,7 @@
 
 Where the implementation does something other than [the design plan](design-plan.tex) describes. Keep this updated as the code changes, so the final report can explain what changed and why.
 
-Parts of the plan that are simply not built yet (audio) are not listed here. Only deliberate departures are.
+Only deliberate departures are listed here.
 
 Status: **proposed** means it's in the code but the group hasn't confirmed it yet. **Agreed** means the group has accepted it (update the plan text then too).
 
@@ -25,8 +25,8 @@ Status: **proposed** means it's in the code but the group hasn't confirmed it ye
 ### A member entry is one value, written only by the member · proposed
 
 - **Plan:** a member has Node ID, Address, Samples held and a Heartbeat. Only the heartbeat is shown with a stamp, and the text says a node "increases the version of its own member entry".
-- **Code:** the whole entry `{address, port, samples}` is one value with one stamp, written only by the member itself. Its version is the heartbeat.
-- **Why:** only the member knows its own samples and address, so nobody else needs to write the entry, and a single stamp is enough.
+- **Code:** the whole entry `{name, address, port}` is one value with one stamp, written only by the member itself. Its version is the heartbeat. (There is no samples list: see Preset sounds.)
+- **Why:** only the member knows its own name and address, so nobody else needs to write the entry, and a single stamp is enough.
 
 ### Member entries carry a display name · proposed
 
@@ -83,7 +83,7 @@ Status: **proposed** means it's in the code but the group hasn't confirmed it ye
 
 - **Plan:** members add their own sample files. A track is identified by the hash of its sample, each member lists the samples it holds, and a node missing a sample pulls it from another member over TCP.
 - **Decision:** the program ships with a set of preset sounds and there is no file sharing. Every node already has every sound, so no sample is ever transferred.
-- **Consequences for the code (to do):** tracks will be identified by preset name instead of a hash, the `samples` list in member entries and the planned file request message go away, and adding a track means picking a preset.
+- **Code:** tracks are identified by preset name (`src/presets.ts`: kick, snare, hat, clap, tom) instead of a hash, member entries have no `samples` list, and there is no file request message. Adding a track means picking a preset. The sounds are synthesized when the program starts.
 - **Why:** the group decided to focus on the shared state and the synchronized playback.
 
 ## Playhead synchronization
@@ -114,6 +114,3 @@ The plan's approach is built: the live node with the highest ID is elected time 
 - **Code:** ELECTION, ANSWER and COORDINATOR as in the textbook bully algorithm, over UDP. Because UDP can lose them: ELECTION is sent twice; the reference repeats COORDINATOR every 2 s, which also tells nodes that joined later; a node that got an ANSWER but no COORDINATOR within 4 s starts over. A new node waits 3 s to hear of an existing reference before it holds an election itself.
 - **Known effect:** nodes that start together may elect themselves before they know of the higher nodes. The extra references disappear within a few seconds once the higher nodes are known (see the cost under the previous entry).
 
-### Not done yet
-
-- Correcting for each machine's audio output latency (there is no audio yet).
