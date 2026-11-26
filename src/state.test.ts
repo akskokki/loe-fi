@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  addTrack, emptyState, heartbeat, isState, merge, playheadAt, setSteps, setTrackStatus, stepDurationMs,
+  addTrack, emptyState, heartbeat, isState, isValidName, memberName, merge, playheadAt, setSteps, setTrackStatus, stepDurationMs,
   toggleCell, updatePlayback, type NodeId, type State, type TrackStatus,
 } from './state.js';
 
 const A = 1, B = 2, C = 3;
-const member = (port: number) => ({ address: '10.0.0.1', port, samples: [] });
+const member = (port: number) => ({ name: `peer${port}`, address: '10.0.0.1', port, samples: [] });
 
 test('the higher version wins, whichever node wrote it', () => {
   let a = addTrack(emptyState(), A, 'kick', 'kick.wav');
@@ -72,7 +72,22 @@ test('isState accepts real states and rejects broken ones', () => {
   assert.ok(!isState(broken((s) => { s.settings.steps.value = 0; })));
   assert.ok(!isState(broken((s) => { delete s.playback.value.bpm; })));
   assert.ok(!isState(broken((s) => { s.members[A].stamp = null; })));
+  assert.ok(!isState(broken((s) => { delete s.members[A].value.name; })));
+  assert.ok(!isState(broken((s) => { s.members[A].value.name = '\x1b[2Jx'; })));
   assert.ok(!isState({ type: 'STATE', from: 42, beat: 3, members: [] })); // the old connection-test message
+});
+
+test('isValidName allows short printable names only', () => {
+  for (const ok of ['alice', 'Bob Smith', 'Jäsä', '名前', 'a'.repeat(16)]) assert.ok(isValidName(ok), ok);
+  for (const bad of ['', ' alice', 'alice ', 'a'.repeat(17), 'a\nb', 'a\x1b[31mb', 'a‮b', 42, null]) {
+    assert.ok(!isValidName(bad), JSON.stringify(bad));
+  }
+});
+
+test('memberName falls back to the node ID for an unknown member', () => {
+  const s = heartbeat(emptyState(), A, member(7051));
+  assert.equal(memberName(s, A), 'peer7051');
+  assert.equal(memberName(s, B), String(B));
 });
 
 // --- Convergence: merge must be commutative, associative and idempotent ---

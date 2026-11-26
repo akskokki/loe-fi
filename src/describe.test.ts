@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addTrack, emptyState, toggleCell, type NodeId, type State } from './state.js';
+import { addTrack, emptyState, heartbeat, toggleCell, type NodeId, type State } from './state.js';
 import { describeChanges } from './describe.js';
 
 const toggle = (s: State, me: NodeId, steps: number[]) => steps.reduce((acc, i) => toggleCell(acc, me, 'kick', i - 1), s);
@@ -24,4 +24,9 @@ test('steps turned on and off, or by different nodes, get separate lines', () =>
     'kick step 3 on (by 1)',
     'kick step 4 on (by 2)',
   ]);
+});
+
+test('changes name their author once the author has a member entry', () => {
+  const named = heartbeat(base, 2, { name: 'alice', address: null, port: 7052, samples: [] });
+  assert.deepEqual(describeChanges(named, toggle(named, 2, [1])), ['kick step 1 on (by alice)']);
 });
