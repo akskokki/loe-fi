@@ -1,7 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { stepsBetween } from './schedule.js';
-import { addTrack, emptyState, playheadAt, setTrackStatus, toggleCell, updatePlayback, type State } from '../state/state.js';
+import {
+  addTrack,
+  emptyState,
+  playheadAt,
+  setTrackStatus,
+  toggleCell,
+  updatePlayback,
+  type State,
+} from '../state/state.js';
 
 const ME = 1;
 
@@ -15,21 +23,33 @@ function beat(): State {
 
 test('steps in a range, with the tracks that hit on each', () => {
   const hits = stepsBetween(beat(), 1000, 1000 + 5 * 125);
-  assert.deepEqual(hits.map((h) => [h.k, h.time, h.step, h.tracks]), [
-    [0, 1000, 0, ['kick']],
-    [1, 1125, 1, []],
-    [2, 1250, 2, []],
-    [3, 1375, 3, []],
-    [4, 1500, 4, ['kick', 'snare']],
-  ]);
+  assert.deepEqual(
+    hits.map((h) => [h.k, h.time, h.step, h.tracks]),
+    [
+      [0, 1000, 0, ['kick']],
+      [1, 1125, 1, []],
+      [2, 1250, 2, []],
+      [3, 1375, 3, []],
+      [4, 1500, 4, ['kick', 'snare']],
+    ],
+  );
 });
 
 test('the range is start-inclusive and end-exclusive, and steps wrap at the step count', () => {
   const s = beat();
-  assert.deepEqual(stepsBetween(s, 1001, 1125).map((h) => h.k), []);
-  assert.deepEqual(stepsBetween(s, 1125, 1126).map((h) => h.k), [1]);
+  assert.deepEqual(
+    stepsBetween(s, 1001, 1125).map((h) => h.k),
+    [],
+  );
+  assert.deepEqual(
+    stepsBetween(s, 1125, 1126).map((h) => h.k),
+    [1],
+  );
   const lap = stepsBetween(s, 1000 + 16 * 125, 1000 + 17 * 125); // 16 steps by default
-  assert.deepEqual(lap.map((h) => [h.step, h.tracks]), [[0, ['kick']]]);
+  assert.deepEqual(
+    lap.map((h) => [h.step, h.tracks]),
+    [[0, ['kick']]],
+  );
 });
 
 test('muted tracks and stopped playback make no sound', () => {

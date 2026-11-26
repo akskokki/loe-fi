@@ -30,8 +30,11 @@ export function renderPreset(preset: Preset, sampleRate: number): Float32Array {
       });
     }
     case 'snare':
-      return render(0.25, sampleRate, (t) =>
-        noise() * Math.exp(-t * 22) * 0.5 + Math.sin(2 * Math.PI * 190 * t) * Math.exp(-t * 30) * 0.3);
+      return render(
+        0.25,
+        sampleRate,
+        (t) => noise() * Math.exp(-t * 22) * 0.5 + Math.sin(2 * Math.PI * 190 * t) * Math.exp(-t * 30) * 0.3,
+      );
     case 'hat': {
       let prev = 0;
       return render(0.08, sampleRate, (t) => {

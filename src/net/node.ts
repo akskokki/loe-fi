@@ -289,7 +289,9 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
       return;
     }
     if (!wellFormed(msg)) {
-      this.opts.log(`ignored a message in an unknown format from ${where} (is it running an older version? git pull there)`);
+      this.opts.log(
+        `ignored a message in an unknown format from ${where} (is it running an older version? git pull there)`,
+      );
       return;
     }
     try {
@@ -310,7 +312,8 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
       this.sendState(from);
     } else if (msg.type === 'STATE') {
       if (this.opts.verbose) log(`<- STATE from ${msg.from} (${from.address}:${from.port}, ${bytes} bytes)`);
-      if (!this.joined && this.joinTarget?.address === from.address && this.joinTarget.port === from.port) this.joined = true;
+      if (!this.joined && this.joinTarget?.address === from.address && this.joinTarget.port === from.port)
+        this.joined = true;
       this.learnAddress(msg.to);
       const before = this.state;
       this.state = merge(this.state, msg.state);
@@ -330,9 +333,12 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
       if (msg.from !== this.election.reference) return; // a late reply from a previous reference
       const wasSynced = this.clock.synced;
       const sample = this.clock.addSample(msg.t0, msg.t1, msg.t2, this.clock.local());
-      if (this.opts.verbose) log(`<- TIME_REPLY offset ${sample.offset.toFixed(2)} ms, delay ${sample.delay.toFixed(2)} ms`);
+      if (this.opts.verbose)
+        log(`<- TIME_REPLY offset ${sample.offset.toFixed(2)} ms, delay ${sample.delay.toFixed(2)} ms`);
       if (!wasSynced && this.clock.synced) {
-        log(`clock synced to ${memberName(this.state, msg.from)}: offset ${this.clock.offset.toFixed(1)} ms, delay ${this.clock.delay?.toFixed(1)} ms`);
+        log(
+          `clock synced to ${memberName(this.state, msg.from)}: offset ${this.clock.offset.toFixed(1)} ms, delay ${this.clock.delay?.toFixed(1)} ms`,
+        );
         this.emit('change');
       }
     }
@@ -340,7 +346,8 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
 
   /** Take our address from a message's `to`, but don't let a loopback address replace a real one. */
   private learnAddress(to: Address) {
-    if (to.address === this.myAddress || (this.myAddress && !isLoopback(this.myAddress) && isLoopback(to.address))) return;
+    if (to.address === this.myAddress || (this.myAddress && !isLoopback(this.myAddress) && isLoopback(to.address)))
+      return;
     this.opts.log(`others reach me at ${to.address}:${this.opts.port}`);
     this.myAddress = to.address;
     this.state = heartbeat(this.state, this.id, this.memberInfo()); // so the next message carries it

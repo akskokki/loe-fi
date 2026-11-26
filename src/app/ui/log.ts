@@ -8,7 +8,10 @@ export class LogBuffer {
   private file: fs.WriteStream | undefined;
 
   /** `path` is only opened when the first line is written. */
-  constructor(readonly path: string, private readonly keep: number) {}
+  constructor(
+    readonly path: string,
+    private readonly keep: number,
+  ) {}
 
   log(line: string) {
     const stamped = `${new Date().toISOString().slice(11, 23)} ${line}`;

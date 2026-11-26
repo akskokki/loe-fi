@@ -31,7 +31,8 @@ async function loadAudio(): Promise<typeof import('node-web-audio-api')> {
 }
 
 /** An ArrayBuffer holding exactly these bytes, as decodeAudioData wants. */
-const arrayBufferOf = (bytes: Uint8Array) => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+const arrayBufferOf = (bytes: Uint8Array) =>
+  bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 
 export class AudioEngine {
   /** Decoded sounds by track key. Samples are decoded the first time they are needed. */

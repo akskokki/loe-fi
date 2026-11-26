@@ -8,7 +8,6 @@ import { isHash, sha256 } from './hash.js';
 /** The design plan's "maximum of a few megabytes". */
 export const MAX_SAMPLE_BYTES = 5 * 1024 * 1024;
 
-
 export class SampleStore {
   private hashes = new Set<string>();
 
@@ -40,7 +39,8 @@ export class SampleStore {
       throw new Error(`a sample must be 1 byte to ${MAX_SAMPLE_BYTES / 1024 / 1024} MB, this is ${bytes.length} bytes`);
     }
     const hash = sha256(bytes);
-    if (expected !== undefined && hash !== expected) throw new Error(`content does not match hash ${expected.slice(0, 12)}…`);
+    if (expected !== undefined && hash !== expected)
+      throw new Error(`content does not match hash ${expected.slice(0, 12)}…`);
     if (!this.has(hash)) {
       // Write to a temporary name and rename, so a crash never leaves a half-written file under a hash.
       const tmp = path.join(this.dir, `.${hash}.${process.pid}.tmp`);

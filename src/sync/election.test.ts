@@ -1,6 +1,12 @@
 import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { ANSWER_TIMEOUT_MS, COORDINATOR_TIMEOUT_MS, INITIAL_WAIT_MS, Election, type ElectionMsgType } from './election.js';
+import {
+  ANSWER_TIMEOUT_MS,
+  COORDINATOR_TIMEOUT_MS,
+  INITIAL_WAIT_MS,
+  Election,
+  type ElectionMsgType,
+} from './election.js';
 import type { NodeId } from '../state/state.js';
 
 /** An Election for node `me` with fake members and a record of what it sent. */
@@ -24,13 +30,19 @@ test('the highest node wins at once and announces itself', (t) => {
   const { e, sent } = setup(t, 3, [1, 2]);
   e.start('test');
   assert.equal(e.reference, 3);
-  assert.deepEqual(sent, [[1, 'COORDINATOR'], [2, 'COORDINATOR']]);
+  assert.deepEqual(sent, [
+    [1, 'COORDINATOR'],
+    [2, 'COORDINATOR'],
+  ]);
 });
 
 test('a lower node asks the higher ones and follows the COORDINATOR it gets', (t) => {
   const { e, sent } = setup(t, 1, [2, 3]);
   e.start('test');
-  assert.deepEqual(sent, [[2, 'ELECTION'], [3, 'ELECTION']]);
+  assert.deepEqual(sent, [
+    [2, 'ELECTION'],
+    [3, 'ELECTION'],
+  ]);
   t.mock.timers.tick(ANSWER_TIMEOUT_MS / 2);
   assert.equal(sent.length, 4); // ELECTION sent a second time, in case UDP lost it
   e.receive('ANSWER', 3);
@@ -45,7 +57,10 @@ test('no ANSWER means the node wins', (t) => {
   e.start('test');
   t.mock.timers.tick(ANSWER_TIMEOUT_MS);
   assert.equal(e.reference, 1);
-  assert.deepEqual(sent.slice(-2), [[2, 'COORDINATOR'], [3, 'COORDINATOR']]);
+  assert.deepEqual(sent.slice(-2), [
+    [2, 'COORDINATOR'],
+    [3, 'COORDINATOR'],
+  ]);
 });
 
 test('an ANSWER without a COORDINATOR leads to a new election', (t) => {
@@ -60,7 +75,10 @@ test('an ANSWER without a COORDINATOR leads to a new election', (t) => {
 test('ELECTION from a lower node is answered and starts our own election', (t) => {
   const { e, sent } = setup(t, 2, [1, 3]);
   e.receive('ELECTION', 1);
-  assert.deepEqual(sent, [[1, 'ANSWER'], [3, 'ELECTION']]);
+  assert.deepEqual(sent, [
+    [1, 'ANSWER'],
+    [3, 'ELECTION'],
+  ]);
 });
 
 test('a reference that times out triggers an election', (t) => {
@@ -107,5 +125,8 @@ test('the reference answers a lower COORDINATOR by announcing itself again', (t)
   sent.length = 0;
   e.receive('COORDINATOR', 2);
   assert.equal(e.reference, 3);
-  assert.deepEqual(sent, [[1, 'COORDINATOR'], [2, 'COORDINATOR']]);
+  assert.deepEqual(sent, [
+    [1, 'COORDINATOR'],
+    [2, 'COORDINATOR'],
+  ]);
 });

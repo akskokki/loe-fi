@@ -25,7 +25,12 @@ export function stepsBetween(s: State, from: number, to: number): Hit[] {
   const hits: Hit[] = [];
   for (let k = Math.max(0, Math.ceil((from - p.at) / dur)); p.at + k * dur < to; k++) {
     const step = (((p.step + k) % steps) + steps) % steps;
-    hits.push({ k, time: p.at + k * dur, step, tracks: tracks.filter(([, t]) => t.cells[step].value).map(([key]) => key) });
+    hits.push({
+      k,
+      time: p.at + k * dur,
+      step,
+      tracks: tracks.filter(([, t]) => t.cells[step].value).map(([key]) => key),
+    });
   }
   return hits;
 }

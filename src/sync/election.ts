@@ -134,7 +134,13 @@ export class Election {
   private setReference(id: NodeId | null) {
     if (id === this.reference) return;
     this.reference = id;
-    this.d.log(id === null ? 'no time reference' : id === this.d.me ? 'I am the time reference' : `time reference is ${this.d.nameOf(id)}`);
+    this.d.log(
+      id === null
+        ? 'no time reference'
+        : id === this.d.me
+          ? 'I am the time reference'
+          : `time reference is ${this.d.nameOf(id)}`,
+    );
     this.d.onChange(id);
   }
 

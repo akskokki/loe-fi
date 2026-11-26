@@ -16,7 +16,14 @@ export const COMMON_OPTIONS = {
   samples: { type: 'string', default: 'samples' }, // folder for sample files; give each peer on one machine its own
 } as const;
 
-export type CommonArgs = { port: string; join?: string; name?: string; verbose: boolean; drop: string; samples: string };
+export type CommonArgs = {
+  port: string;
+  join?: string;
+  name?: string;
+  verbose: boolean;
+  drop: string;
+  samples: string;
+};
 
 /** Parses "host:port" (port defaults to 7051). */
 export function parseAddress(s: string): Address {
@@ -43,7 +50,8 @@ export function chooseName(arg: string | undefined): { name: string } | { error:
 /** This machine's IPv4 addresses, for telling others what to join. */
 export function localAddresses(): string[] {
   return Object.values(os.networkInterfaces()).flatMap((addrs) =>
-    (addrs ?? []).filter((a) => a.family === 'IPv4').map((a) => a.address));
+    (addrs ?? []).filter((a) => a.family === 'IPv4').map((a) => a.address),
+  );
 }
 
 /** A node set up from the common options. Exits with a message if --name isn't allowed. */
@@ -78,10 +86,18 @@ export async function startOrExit(node: PeerNode) {
  * Opens the audio output and starts playing the node's grid in session time. Audio is optional:
  * returns the reason instead if this machine can't play sound (the grid still syncs, silently).
  */
-export async function startAudio(node: PeerNode, log: (line: string) => void): Promise<{ audio: AudioEngine } | { off: string }> {
+export async function startAudio(
+  node: PeerNode,
+  log: (line: string) => void,
+): Promise<{ audio: AudioEngine } | { off: string }> {
   try {
     const audio = await AudioEngine.open();
-    audio.start(() => node.state, () => node.now(), (h) => (node.store.has(h) ? node.store.read(h) : null), log);
+    audio.start(
+      () => node.state,
+      () => node.now(),
+      (h) => (node.store.has(h) ? node.store.read(h) : null),
+      log,
+    );
     log(`audio on, output latency ${audio.latencyMs.toFixed(0)} ms`);
     return { audio };
   } catch (err) {

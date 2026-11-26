@@ -24,7 +24,10 @@ export class SampleFetcher {
   private downloading = new Set<string>();
   private failedHolders = new Map<string, Map<NodeId, number>>();
 
-  constructor(private readonly store: SampleStore, private readonly d: FetcherDeps) {}
+  constructor(
+    private readonly store: SampleStore,
+    private readonly d: FetcherDeps,
+  ) {}
 
   /** Starts fetching the samples of tracks that aren't deleted and that aren't stored here yet. */
   fetchMissing(state: State, now = Date.now()) {
@@ -34,9 +37,14 @@ export class SampleFetcher {
       const { hash } = sound;
       if (this.store.has(hash) || this.downloading.has(hash) || this.downloading.size >= MAX_DOWNLOADS) continue;
       const failed = this.failedHolders.get(hash) ?? new Map<NodeId, number>();
-      const holders = this.d.liveMembers().filter((id) =>
-        Object.hasOwn(state.members, id) && state.members[id].value.samples.includes(hash)
-        && now >= (failed.get(id) ?? 0));
+      const holders = this.d
+        .liveMembers()
+        .filter(
+          (id) =>
+            Object.hasOwn(state.members, id) &&
+            state.members[id].value.samples.includes(hash) &&
+            now >= (failed.get(id) ?? 0),
+        );
       if (holders.length === 0) continue; // nobody has it, or all holders failed recently: try again later
       const holder = holders[Math.floor(Math.random() * holders.length)]; // spreads the uploads
       const addr = this.d.addressOf(holder);

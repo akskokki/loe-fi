@@ -11,7 +11,11 @@ import { MAX_SAMPLE_BYTES } from './store.js';
  * dashes (so commands like `t my-cowbell 1` can name it), at most MAX_NAME_LENGTH.
  */
 export function trackNameFor(file: string): string {
-  const base = path.basename(file, path.extname(file)).replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, '').trim().replace(/\s+/g, '-');
+  const base = path
+    .basename(file, path.extname(file))
+    .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, '')
+    .trim()
+    .replace(/\s+/g, '-');
   const name = base.slice(0, MAX_NAME_LENGTH).trim();
   return isValidName(name) ? name : 'sample';
 }
@@ -27,7 +31,9 @@ export async function addSampleFile(node: PeerNode, file: string): Promise<{ key
     if (fs.statSync(file).size > MAX_SAMPLE_BYTES) throw new Error(`larger than ${MAX_SAMPLE_BYTES / 1024 / 1024} MB`);
     bytes = fs.readFileSync(file);
   } catch (err) {
-    throw new Error(`cannot use ${file}: ${(err as NodeJS.ErrnoException).code === 'ENOENT' ? 'no such file' : (err as Error).message}`);
+    throw new Error(
+      `cannot use ${file}: ${(err as NodeJS.ErrnoException).code === 'ENOENT' ? 'no such file' : (err as Error).message}`,
+    );
   }
   let note: string | undefined;
   try {

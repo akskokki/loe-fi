@@ -29,8 +29,15 @@ import { parseArgs } from 'node:util';
 import { PeerNode } from '../net/node.js';
 import { seededRandom } from './rng.js';
 import {
-  addTrack, fingerprint, setSteps, setTrackStatus, toggleCell, updatePlayback,
-  type NodeId, type State, type TrackStatus,
+  addTrack,
+  fingerprint,
+  setSteps,
+  setTrackStatus,
+  toggleCell,
+  updatePlayback,
+  type NodeId,
+  type State,
+  type TrackStatus,
 } from '../state/state.js';
 
 const { values: args } = parseArgs({
@@ -94,11 +101,21 @@ function randomWav(seconds: number): Buffer {
   const rate = 8000;
   const n = Math.floor(seconds * rate);
   const b = Buffer.alloc(44 + n * 2);
-  b.write('RIFF', 0); b.writeUInt32LE(36 + n * 2, 4); b.write('WAVE', 8);
-  b.write('fmt ', 12); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22);
-  b.writeUInt32LE(rate, 24); b.writeUInt32LE(rate * 2, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34);
-  b.write('data', 36); b.writeUInt32LE(n * 2, 40);
-  for (let i = 0; i < n; i++) b.writeInt16LE(Math.round((random() * 2 - 1) * 8000 * Math.exp((-i / rate) * 20)), 44 + i * 2);
+  b.write('RIFF', 0);
+  b.writeUInt32LE(36 + n * 2, 4);
+  b.write('WAVE', 8);
+  b.write('fmt ', 12);
+  b.writeUInt32LE(16, 16);
+  b.writeUInt16LE(1, 20);
+  b.writeUInt16LE(1, 22);
+  b.writeUInt32LE(rate, 24);
+  b.writeUInt32LE(rate * 2, 28);
+  b.writeUInt16LE(2, 32);
+  b.writeUInt16LE(16, 34);
+  b.write('data', 36);
+  b.writeUInt32LE(n * 2, 40);
+  for (let i = 0; i < n; i++)
+    b.writeInt16LE(Math.round((random() * 2 - 1) * 8000 * Math.exp((-i / rate) * 20)), 44 + i * 2);
   return b;
 }
 
@@ -153,8 +170,13 @@ function clockSpread(nodes: PeerNode[]) {
 
 function converged(nodes: PeerNode[]) {
   const prints = new Set(nodes.map((n) => fingerprint(n.state)));
-  return prints.size === 1 && allConnected(nodes) && agreeOnReference(nodes) && clockSpread(nodes) < CLOCK_TOLERANCE_MS
-    && nodes.every(hasAllSounds);
+  return (
+    prints.size === 1 &&
+    allConnected(nodes) &&
+    agreeOnReference(nodes) &&
+    clockSpread(nodes) < CLOCK_TOLERANCE_MS &&
+    nodes.every(hasAllSounds)
+  );
 }
 
 /** Polls `check` every 100 ms; returns the time it took, or null on timeout. */
@@ -168,17 +190,19 @@ async function waitFor(check: () => boolean, timeoutMs: number): Promise<number 
 }
 
 function printTable(nodes: PeerNode[], edits: Map<PeerNode, number>) {
-  console.log('  node  port   skew ms  edits  sent  received  dropped  alive  reference  offset ms  delay ms  samples  fingerprint');
+  console.log(
+    '  node  port   skew ms  edits  sent  received  dropped  alive  reference  offset ms  delay ms  samples  fingerprint',
+  );
   for (const n of nodes) {
     const alive = n.members().filter((m) => m.status === 'alive').length;
     const { sent, received, dropped } = n.stats;
     const sync = n.sync();
-    const ref = sync.iAmReference ? 'me' : sync.referenceName ?? '-';
+    const ref = sync.iAmReference ? 'me' : (sync.referenceName ?? '-');
     console.log(
-      `  ${n.opts.name.padEnd(5)} ${String(n.opts.port).padEnd(6)} ${(n.opts.clockSkewMs ?? 0).toFixed(0).padStart(7)} `
-      + `${String(edits.get(n) ?? 0).padStart(6)} ${String(sent).padStart(5)} ${String(received).padStart(9)} ${String(dropped).padStart(8)} `
-      + `${`${alive}/${nodes.length - 1}`.padStart(6)}  ${ref.padEnd(9)}  ${sync.offsetMs.toFixed(1).padStart(9)}  `
-      + `${(sync.delayMs === null ? '-' : sync.delayMs.toFixed(2)).padStart(8)}  ${String(n.store.list().length).padStart(7)}  ${fingerprint(n.state)}`,
+      `  ${n.opts.name.padEnd(5)} ${String(n.opts.port).padEnd(6)} ${(n.opts.clockSkewMs ?? 0).toFixed(0).padStart(7)} ` +
+        `${String(edits.get(n) ?? 0).padStart(6)} ${String(sent).padStart(5)} ${String(received).padStart(9)} ${String(dropped).padStart(8)} ` +
+        `${`${alive}/${nodes.length - 1}`.padStart(6)}  ${ref.padEnd(9)}  ${sync.offsetMs.toFixed(1).padStart(9)}  ` +
+        `${(sync.delayMs === null ? '-' : sync.delayMs.toFixed(2)).padStart(8)}  ${String(n.store.list().length).padStart(7)}  ${fingerprint(n.state)}`,
     );
   }
   console.log(`  session clocks differ by at most ${clockSpread(nodes).toFixed(2)} ms`);
@@ -186,22 +210,26 @@ function printTable(nodes: PeerNode[], edits: Map<PeerNode, number>) {
 
 // --- Run ---
 
-say(`${PEERS} peers, ${SECONDS} s of edits at ${RATE}/s each, ${Math.round(DROP * 100)}% of received packets dropped`
-  + `, clocks skewed by up to ±${SKEW} ms${OUTAGE ? `, one peer offline for ${OUTAGE} s` : ''}, seed ${args.seed}`);
+say(
+  `${PEERS} peers, ${SECONDS} s of edits at ${RATE}/s each, ${Math.round(DROP * 100)}% of received packets dropped` +
+    `, clocks skewed by up to ±${SKEW} ms${OUTAGE ? `, one peer offline for ${OUTAGE} s` : ''}, seed ${args.seed}`,
+);
 say(`log: ${logPath}`);
 
 const nodes: PeerNode[] = [];
 for (let i = 0; i < PEERS; i++) {
   const joinIndex = i === 0 ? undefined : Math.floor(random() * i); // any earlier node, not always n0
-  nodes.push(new PeerNode({
-    name: `n${i}`,
-    port: BASE_PORT + i,
-    join: joinIndex === undefined ? undefined : { address: '127.0.0.1', port: BASE_PORT + joinIndex },
-    drop: DROP,
-    sampleDir: `${sampleRoot}/n${i}`,
-    clockSkewMs: (random() * 2 - 1) * SKEW,
-    log: (line) => log(`n${i}`, line),
-  }));
+  nodes.push(
+    new PeerNode({
+      name: `n${i}`,
+      port: BASE_PORT + i,
+      join: joinIndex === undefined ? undefined : { address: '127.0.0.1', port: BASE_PORT + joinIndex },
+      drop: DROP,
+      sampleDir: `${sampleRoot}/n${i}`,
+      clockSkewMs: (random() * 2 - 1) * SKEW,
+      log: (line) => log(`n${i}`, line),
+    }),
+  );
   if (joinIndex !== undefined) log('harness', `n${i} joins through n${joinIndex}`);
 }
 
@@ -222,33 +250,43 @@ if (connectMs === null) {
   say(`all ${PEERS} peers connected after ${connectMs} ms`);
 
   // Every node edits on its own timer, so edits from different nodes interleave and conflict.
-  const timers = nodes.map((n) => setInterval(() => {
-    n.edit(randomEdit(n.now()));
-    edits.set(n, edits.get(n)! + 1);
-  }, 1000 / RATE));
+  const timers = nodes.map((n) =>
+    setInterval(() => {
+      n.edit(randomEdit(n.now()));
+      edits.set(n, edits.get(n)! + 1);
+    }, 1000 / RATE),
+  );
 
   // Random nodes add sample files at random moments; the others have to fetch them.
   for (let i = 0; i < SAMPLES; i++) {
     const n = pick(nodes);
     const wav = randomWav(0.1 + random() * 0.4);
-    setTimeout(() => {
-      const key = n.addSample(wav, `s${i}`);
-      TRACKS.push(key);
-      say(`${n.opts.name} adds sample s${i} (${wav.length} bytes, ${key.slice(0, 19)}…)`);
-    }, random() * SECONDS * 800);
+    setTimeout(
+      () => {
+        const key = n.addSample(wav, `s${i}`);
+        TRACKS.push(key);
+        say(`${n.opts.name} adds sample s${i} (${wav.length} bytes, ${key.slice(0, 19)}…)`);
+      },
+      random() * SECONDS * 800,
+    );
   }
 
   if (OUTAGE > 0) {
-    setTimeout(() => {
-      const n = pick(nodes);
-      say(`${n.opts.name} goes offline for ${OUTAGE} s`);
-      n.goOffline(OUTAGE);
-    }, (SECONDS * 1000) / 3);
+    setTimeout(
+      () => {
+        const n = pick(nodes);
+        say(`${n.opts.name} goes offline for ${OUTAGE} s`);
+        n.goOffline(OUTAGE);
+      },
+      (SECONDS * 1000) / 3,
+    );
   }
 
   await sleep(SECONDS * 1000);
   timers.forEach(clearInterval);
-  say(`edits stopped: ${[...edits.values()].reduce((a, b) => a + b, 0)} edits in total; waiting for the copies to converge`);
+  say(
+    `edits stopped: ${[...edits.values()].reduce((a, b) => a + b, 0)} edits in total; waiting for the copies to converge`,
+  );
 
   const convergeMs = await waitFor(() => converged(nodes), CONVERGE_TIMEOUT_MS);
   printTable(nodes, edits);
@@ -256,8 +294,10 @@ if (connectMs === null) {
     say(`FAILED: no convergence within ${CONVERGE_TIMEOUT_MS / 1000} s after the edits stopped`);
     failed = true;
   } else {
-    say(`CONVERGED ${convergeMs} ms after the edits stopped: every peer has the same state, sees all ${PEERS - 1} others, `
-      + `follows the same time reference and has a session clock within ${CLOCK_TOLERANCE_MS} ms of the others`);
+    say(
+      `CONVERGED ${convergeMs} ms after the edits stopped: every peer has the same state, sees all ${PEERS - 1} others, ` +
+        `follows the same time reference and has a session clock within ${CLOCK_TOLERANCE_MS} ms of the others`,
+    );
   }
 
   if (!failed && KILL_REFERENCE) {
@@ -274,8 +314,10 @@ if (connectMs === null) {
     } else {
       const newRef = survivors.find((n) => n.sync().iAmReference)!;
       const moved = Math.max(...survivors.map((n) => Math.abs(n.sync().offsetMs - offsetsBefore.get(n)!)));
-      say(`RECOVERED ${recoverMs} ms after the reference stopped: ${newRef.opts.name} took over, `
-        + `and session time moved by at most ${moved.toFixed(2)} ms on any peer`);
+      say(
+        `RECOVERED ${recoverMs} ms after the reference stopped: ${newRef.opts.name} took over, ` +
+          `and session time moved by at most ${moved.toFixed(2)} ms on any peer`,
+      );
     }
   }
 }

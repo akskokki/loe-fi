@@ -12,7 +12,6 @@ import { isHash } from './hash.js';
 export const presetKey = (p: Preset) => `preset:${p}`;
 export const sampleKey = (hash: string) => `sha256:${hash}`;
 
-
 export type Sound = { kind: 'preset'; preset: Preset } | { kind: 'sample'; hash: string };
 
 /** The sound a track key refers to, or null for a key this version doesn't understand. */
@@ -34,7 +33,8 @@ export function findTrack(s: State, ref: string): { key: string } | { error: str
   const live = keys.filter((k) => s.tracks[k].status.value !== 'deleted');
   const byName = live.filter((k) => s.tracks[k].name.value === ref);
   if (byName.length === 1) return { key: byName[0] };
-  if (byName.length > 1) return { error: `several tracks are called "${ref}"; use the start of a key: ${byName.join(', ')}` };
+  if (byName.length > 1)
+    return { error: `several tracks are called "${ref}"; use the start of a key: ${byName.join(', ')}` };
   const byPrefix = keys.filter((k) => k.startsWith(ref));
   if (ref.length >= 8 && byPrefix.length === 1) return { key: byPrefix[0] };
   return { error: `no track "${ref}"` };

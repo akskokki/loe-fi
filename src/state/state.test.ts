@@ -1,13 +1,28 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  addTrack, emptyState, fingerprint, heartbeat, memberName, merge, playheadAt, setSteps, setTrackStatus, stepDurationMs,
-  toggleCell, updatePlayback, type NodeId, type State, type TrackStatus,
+  addTrack,
+  emptyState,
+  fingerprint,
+  heartbeat,
+  memberName,
+  merge,
+  playheadAt,
+  setSteps,
+  setTrackStatus,
+  stepDurationMs,
+  toggleCell,
+  updatePlayback,
+  type NodeId,
+  type State,
+  type TrackStatus,
 } from './state.js';
 import { isState, isValidName } from './validate.js';
 import { seededRandom } from '../tools/rng.js';
 
-const A = 1, B = 2, C = 3;
+const A = 1,
+  B = 2,
+  C = 3;
 const member = (port: number) => ({ name: `peer${port}`, address: '10.0.0.1', port, samples: [] });
 
 test('the higher version wins, whichever node wrote it', () => {
@@ -55,7 +70,9 @@ test('merge does not modify its arguments', () => {
 });
 
 test('a network key "__proto__" does not change the prototype', () => {
-  const evil = JSON.parse('{"settings":{},"playback":{"value":{},"stamp":{"ver":0,"node":0}},"tracks":{"__proto__":{"x":1}},"members":{}}');
+  const evil = JSON.parse(
+    '{"settings":{},"playback":{"value":{},"stamp":{"ver":0,"node":0}},"tracks":{"__proto__":{"x":1}},"members":{}}',
+  );
   const merged = merge(emptyState(), evil);
   assert.equal(Object.getPrototypeOf(merged.tracks), Object.prototype);
 });
@@ -68,14 +85,62 @@ test('isState accepts real states and rejects broken ones', () => {
     edit(s);
     return s;
   };
-  assert.ok(!isState(broken((s) => { s.tracks.kick = {}; })));
-  assert.ok(!isState(broken((s) => { s.tracks.kick.cells.pop(); })));
-  assert.ok(!isState(broken((s) => { s.tracks.kick.status.value = 'gone'; })));
-  assert.ok(!isState(broken((s) => { s.settings.steps.value = 0; })));
-  assert.ok(!isState(broken((s) => { delete s.playback.value.bpm; })));
-  assert.ok(!isState(broken((s) => { s.members[A].stamp = null; })));
-  assert.ok(!isState(broken((s) => { delete s.members[A].value.name; })));
-  assert.ok(!isState(broken((s) => { s.members[A].value.name = '\x1b[2Jx'; })));
+  assert.ok(
+    !isState(
+      broken((s) => {
+        s.tracks.kick = {};
+      }),
+    ),
+  );
+  assert.ok(
+    !isState(
+      broken((s) => {
+        s.tracks.kick.cells.pop();
+      }),
+    ),
+  );
+  assert.ok(
+    !isState(
+      broken((s) => {
+        s.tracks.kick.status.value = 'gone';
+      }),
+    ),
+  );
+  assert.ok(
+    !isState(
+      broken((s) => {
+        s.settings.steps.value = 0;
+      }),
+    ),
+  );
+  assert.ok(
+    !isState(
+      broken((s) => {
+        delete s.playback.value.bpm;
+      }),
+    ),
+  );
+  assert.ok(
+    !isState(
+      broken((s) => {
+        s.members[A].stamp = null;
+      }),
+    ),
+  );
+  assert.ok(
+    !isState(
+      broken((s) => {
+        delete s.members[A].value.name;
+      }),
+    ),
+  );
+  assert.ok(
+    !isState(
+      broken((s) => {
+        s.members[A].value.name = '\x1b[2Jx';
+      }),
+    ),
+  );
   assert.ok(!isState({ type: 'STATE', from: 42, beat: 3, members: [] })); // the old connection-test message
 });
 
@@ -104,12 +169,18 @@ function randomEdit(s: State, me: NodeId, r: () => number): State {
   const any = <T>(xs: T[]) => xs[Math.floor(r() * xs.length)];
   const now = Math.floor(r() * 10_000);
   switch (Math.floor(r() * 6)) {
-    case 0: return addTrack(s, me, any(HASHES), `${any(HASHES)}.wav`);
-    case 1: return setTrackStatus(s, me, any(HASHES), any(STATUSES));
-    case 2: return setSteps(s, me, 1 + Math.floor(r() * 32));
-    case 3: return updatePlayback(s, me, now, { playing: r() < 0.5, bpm: 60 + Math.floor(r() * 120) });
-    case 4: return heartbeat(s, me, member(7050 + me));
-    default: return toggleCell(s, me, any(HASHES), Math.floor(r() * 32));
+    case 0:
+      return addTrack(s, me, any(HASHES), `${any(HASHES)}.wav`);
+    case 1:
+      return setTrackStatus(s, me, any(HASHES), any(STATUSES));
+    case 2:
+      return setSteps(s, me, 1 + Math.floor(r() * 32));
+    case 3:
+      return updatePlayback(s, me, now, { playing: r() < 0.5, bpm: 60 + Math.floor(r() * 120) });
+    case 4:
+      return heartbeat(s, me, member(7050 + me));
+    default:
+      return toggleCell(s, me, any(HASHES), Math.floor(r() * 32));
   }
 }
 
@@ -174,7 +245,12 @@ test('a tempo change keeps the playhead where it is', () => {
 test('fingerprint ignores key order and heartbeats, but not content', () => {
   const a = heartbeat(toggleCell(addTrack(emptyState(), A, 'kick', 'kick.wav'), A, 'kick', 1), A, member(7051));
   const viaNetwork = JSON.parse(JSON.stringify(a));
-  const reordered = { members: viaNetwork.members, tracks: viaNetwork.tracks, playback: viaNetwork.playback, settings: viaNetwork.settings };
+  const reordered = {
+    members: viaNetwork.members,
+    tracks: viaNetwork.tracks,
+    playback: viaNetwork.playback,
+    settings: viaNetwork.settings,
+  };
   assert.equal(fingerprint(reordered), fingerprint(a));
   assert.equal(fingerprint(heartbeat(a, A, member(7051))), fingerprint(a)); // only the heartbeat moved
   assert.notEqual(fingerprint(toggleCell(a, B, 'kick', 2)), fingerprint(a));

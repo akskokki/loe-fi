@@ -4,7 +4,9 @@ import { Membership, PEER_TIMEOUT_MS } from './membership.js';
 import { wellFormed } from './messages.js';
 import { emptyState, heartbeat, type NodeId, type State } from '../state/state.js';
 
-const ME = 1, A = 2, B = 3;
+const ME = 1,
+  A = 2,
+  B = 3;
 const info = (port: number) => ({ name: `n${port}`, address: '10.0.0.9', port, samples: [] });
 /** A state where member `id` has sent `beats` heartbeats. */
 const withBeats = (s: State, id: NodeId, beats: number) => {

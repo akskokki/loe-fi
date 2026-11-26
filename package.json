@@ -10,9 +10,12 @@
     "check": "tsc --noEmit",
     "test": "tsx --test \"src/**/*.test.ts\"",
     "ui": "tsx src/app/ui/main.tsx",
-    "harness": "tsx src/tools/harness.ts"
+    "harness": "tsx src/tools/harness.ts",
+    "lint": "biome check src",
+    "format": "biome format --write src"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.6.8",
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "tsx": "^4.23.15",

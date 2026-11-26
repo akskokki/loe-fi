@@ -117,7 +117,8 @@ function write<T>(reg: Reg<T>, value: T, me: NodeId): Reg<T> {
 const unset = <T>(value: T): Reg<T> => ({ value, stamp: NO_STAMP });
 
 /** Own-property lookup, so a name like "constructor" is not found on Object.prototype. */
-const getTrack = (s: State, hash: string): Track | undefined => (Object.hasOwn(s.tracks, hash) ? s.tracks[hash] : undefined);
+const getTrack = (s: State, hash: string): Track | undefined =>
+  Object.hasOwn(s.tracks, hash) ? s.tracks[hash] : undefined;
 
 export function emptyState(): State {
   return {
@@ -199,7 +200,9 @@ function canonical(x: unknown): string {
  * nodes run. Two nodes with the same fingerprint have the same sequencer state.
  */
 export function fingerprint(s: State): string {
-  const members = Object.entries(s.members).map(([id, m]) => [id, m.value.name]).sort();
+  const members = Object.entries(s.members)
+    .map(([id, m]) => [id, m.value.name])
+    .sort();
   const shared = { settings: s.settings, playback: s.playback, tracks: s.tracks, members };
   return createHash('sha256').update(canonical(shared)).digest('hex').slice(0, 12);
 }

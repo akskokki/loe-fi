@@ -3,7 +3,16 @@
 // after every fourth; control rows: segments one after another) and check every one of them.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CELL_WIDTH, CONTROLS_ROW, CONTROL_ROW_STEP, LABEL_WIDTH, PAD, TRACKS_ROW, controlRows, hitTest } from './layout.js';
+import {
+  CELL_WIDTH,
+  CONTROLS_ROW,
+  CONTROL_ROW_STEP,
+  LABEL_WIDTH,
+  PAD,
+  TRACKS_ROW,
+  controlRows,
+  hitTest,
+} from './layout.js';
 
 /** Terminal mouse coordinates (1-based) of a content position (0-based, inside the padding). */
 const at = (cx: number, cy: number): [number, number] => [cx + PAD + 1, cy + PAD + 1];
@@ -17,7 +26,11 @@ test('every character of every cell maps to that track and step', () => {
     for (let step = 0; step < 32; step++) {
       for (let c = 0; c < CELL_WIDTH; c++) {
         const [x, y] = at(cellStart(step) + c, TRACKS_ROW + track);
-        assert.deepEqual(hitTest(x, y, rows, 5, 32), { kind: 'cell', track, step }, `track ${track} step ${step} char ${c}`);
+        assert.deepEqual(
+          hitTest(x, y, rows, 5, 32),
+          { kind: 'cell', track, step },
+          `track ${track} step ${step} char ${c}`,
+        );
       }
     }
   }
@@ -25,7 +38,8 @@ test('every character of every cell maps to that track and step', () => {
 
 test('the gaps between groups of four, steps past the end and rows past the last track hit nothing', () => {
   const rows = controlRows(false, 120, 16);
-  for (const step of [3, 7, 11]) assert.equal(hitTest(...at(cellStart(step) + CELL_WIDTH, TRACKS_ROW), rows, 2, 16), null);
+  for (const step of [3, 7, 11])
+    assert.equal(hitTest(...at(cellStart(step) + CELL_WIDTH, TRACKS_ROW), rows, 2, 16), null);
   assert.equal(hitTest(...at(cellStart(16), TRACKS_ROW), rows, 2, 16), null);
   assert.equal(hitTest(...at(cellStart(0), TRACKS_ROW + 2), rows, 2, 16), null);
 });

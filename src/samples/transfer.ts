@@ -55,7 +55,12 @@ export function serveSamples(store: SampleStore, port: number, log: (line: strin
 }
 
 /** Fetches a sample's bytes from a member. Does not check the hash; SampleStore.put does. */
-export function fetchSample(address: string, port: number, hash: string, timeoutMs = TRANSFER_TIMEOUT_MS): Promise<Buffer> {
+export function fetchSample(
+  address: string,
+  port: number,
+  hash: string,
+  timeoutMs = TRANSFER_TIMEOUT_MS,
+): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const sock = net.connect(port, address);
     const fail = (why: string) => {
@@ -68,13 +73,15 @@ export function fetchSample(address: string, port: number, hash: string, timeout
 
     let buf = Buffer.alloc(0);
     let length: number | null = null;
-    sock.on('data', (chunk: Buffer) => { // no encoding is set, so chunks are Buffers
+    sock.on('data', (chunk: Buffer) => {
+      // no encoding is set, so chunks are Buffers
       buf = Buffer.concat([buf, chunk]);
       if (length === null) {
         const end = buf.indexOf('\n');
         if (end < 0) return buf.length > MAX_HEADER ? fail('bad reply') : undefined;
         const [status, len] = buf.subarray(0, end).toString('latin1').split(' ');
-        if (status !== 'OK') return fail(status === 'BUSY' ? 'busy' : status === 'NO' ? "doesn't have it" : 'bad reply');
+        if (status !== 'OK')
+          return fail(status === 'BUSY' ? 'busy' : status === 'NO' ? "doesn't have it" : 'bad reply');
         length = Number(len);
         if (!Number.isInteger(length) || length <= 0 || length > MAX_SAMPLE_BYTES) return fail('bad length');
         buf = buf.subarray(end + 1);

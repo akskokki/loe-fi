@@ -22,7 +22,7 @@ function fakeContext(outputLatency: number) {
   return { ctx, starts, origin };
 }
 
-test('every hit is heard exactly at its step\'s session time, once', async () => {
+test("every hit is heard exactly at its step's session time, once", async () => {
   const latency = 0.03;
   const { ctx, starts, origin } = fakeContext(latency);
   // Session time runs 12 345 ms ahead of this machine's clock, as after syncing to a reference.
@@ -44,5 +44,7 @@ test('every hit is heard exactly at its step\'s session time, once', async () =>
   const expected = [0, 2, 4, 6].map((step) => at + step * 125).filter((t) => t < now());
   assert.ok(expected.length >= 4);
   assert.equal(heard.length, expected.length, `heard ${heard.length} hits, expected ${expected.length}`);
-  heard.forEach((t, i) => assert.ok(Math.abs(t - expected[i]) < 1, `hit ${i} off by ${(t - expected[i]).toFixed(3)} ms`));
+  heard.forEach((t, i) =>
+    assert.ok(Math.abs(t - expected[i]) < 1, `hit ${i} off by ${(t - expected[i]).toFixed(3)} ms`),
+  );
 });

@@ -10,7 +10,9 @@ export function HelpLine({ items }: { items: [string, string][] }) {
       {items.map(([key, desc], i) => (
         <Text key={key}>
           {i > 0 && <Text dimColor> · </Text>}
-          <Text color="yellow" bold>{key}</Text>
+          <Text color="yellow" bold>
+            {key}
+          </Text>
           <Text dimColor> {desc}</Text>
         </Text>
       ))}

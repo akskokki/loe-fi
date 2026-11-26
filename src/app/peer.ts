@@ -11,7 +11,17 @@ import readline from 'node:readline';
 import { parseArgs } from 'node:util';
 import type { PeerNode } from '../net/node.js';
 import { COMMON_OPTIONS, localAddresses, nodeFromArgs, startAudio, startOrExit } from './cli.js';
-import { MAX_STEPS, addTrack, fingerprint, setSteps, setTrackStatus, toggleCell, updatePlayback, type NodeId, type State } from '../state/state.js';
+import {
+  MAX_STEPS,
+  addTrack,
+  fingerprint,
+  setSteps,
+  setTrackStatus,
+  toggleCell,
+  updatePlayback,
+  type NodeId,
+  type State,
+} from '../state/state.js';
 import { renderGrid } from '../state/describe.js';
 import { PRESETS, isPreset } from '../audio/presets.js';
 import { findTrack, presetKey } from '../samples/keys.js';
@@ -24,7 +34,9 @@ const { values: args } = parseArgs({
   },
 });
 
-const node: PeerNode = nodeFromArgs(args, (s) => console.log(`${new Date().toISOString().slice(11, 23)} [${node.id}] ${s}`));
+const node: PeerNode = nodeFromArgs(args, (s) =>
+  console.log(`${new Date().toISOString().slice(11, 23)} [${node.id}] ${s}`),
+);
 
 const HELP = `commands:
   add <sound>          add a track with a preset: ${PRESETS.join(', ')}
@@ -42,8 +54,12 @@ function parseSteps(args: string[]): number[] {
   const steps = new Set<number>();
   for (const arg of args) {
     const range = arg.match(/^(\d+)-(\d+)$/);
-    if (!range) { steps.add(Number(arg) - 1); continue; }
-    const lo = Number(range[1]), hi = Math.min(Number(range[2]), MAX_STEPS);
+    if (!range) {
+      steps.add(Number(arg) - 1);
+      continue;
+    }
+    const lo = Number(range[1]),
+      hi = Math.min(Number(range[2]), MAX_STEPS);
     for (let s = lo; s <= hi; s++) steps.add(s - 1);
   }
   return [...steps];
@@ -51,22 +67,31 @@ function parseSteps(args: string[]): number[] {
 
 function show() {
   for (const l of renderGrid(node.state, node.now())) console.log(`  ${l}`);
-  const missing = Object.entries(node.state.tracks).filter(([k, t]) => t.status.value !== 'deleted' && !node.hasSound(k));
-  if (missing.length > 0) console.log(`  sample files not here yet: ${missing.map(([, t]) => t.name.value).join(', ')}`);
+  const missing = Object.entries(node.state.tracks).filter(
+    ([k, t]) => t.status.value !== 'deleted' && !node.hasSound(k),
+  );
+  if (missing.length > 0)
+    console.log(`  sample files not here yet: ${missing.map(([, t]) => t.name.value).join(', ')}`);
   console.log(`  sample files held: ${node.store.list().length}`);
   for (const m of node.members()) {
     const seen = m.seenMsAgo === undefined ? '' : `, seen ${m.seenMsAgo} ms ago`;
-    console.log(`  member ${m.name} (${m.id}) ${m.address ?? '?'}:${m.port} heartbeat ${m.heartbeat} (${m.status}${seen})`);
+    console.log(
+      `  member ${m.name} (${m.id}) ${m.address ?? '?'}:${m.port} heartbeat ${m.heartbeat} (${m.status}${seen})`,
+    );
   }
   // Same fingerprint on two peers = same sequencer state. Packet counts include the --drop losses.
   const { sent, received, dropped } = node.stats;
-  console.log(`  state fingerprint ${fingerprint(node.state)} · packets sent ${sent}, received ${received}, dropped ${dropped}`);
+  console.log(
+    `  state fingerprint ${fingerprint(node.state)} · packets sent ${sent}, received ${received}, dropped ${dropped}`,
+  );
   const sync = node.sync();
   if (sync.iAmReference) console.log('  clock: this node is the time reference');
   else if (sync.reference === null) console.log('  clock: no time reference yet');
   else {
     const delay = sync.delayMs === null ? '' : `, round trip ${sync.delayMs.toFixed(1)} ms`;
-    console.log(`  clock: ${sync.synced ? 'synced' : 'syncing'} to ${sync.referenceName}, offset ${sync.offsetMs.toFixed(1)} ms${delay}`);
+    console.log(
+      `  clock: ${sync.synced ? 'synced' : 'syncing'} to ${sync.referenceName}, offset ${sync.offsetMs.toFixed(1)} ms${delay}`,
+    );
   }
 }
 
@@ -82,7 +107,8 @@ function run(line: string) {
   };
   let key: string | null;
   switch (cmd) {
-    case '': return;
+    case '':
+      return;
     case 'add': {
       const arg = line.trim().slice(3).trim(); // a file path may contain spaces
       if (isPreset(arg)) {
@@ -100,18 +126,40 @@ function run(line: string) {
       if (!(key = track())) return;
       change = (s, me) => parseSteps(rest.slice(1)).reduce((acc, step) => toggleCell(acc, me, key!, step), s);
       break;
-    case 'mute': if (!(key = track())) return; change = (s, me) => setTrackStatus(s, me, key!, 'muted'); break;
-    case 'unmute': if (!(key = track())) return; change = (s, me) => setTrackStatus(s, me, key!, 'active'); break;
-    case 'del': if (!(key = track())) return; change = (s, me) => setTrackStatus(s, me, key!, 'deleted'); break;
-    case 'play': change = (s, me) => updatePlayback(s, me, now, { playing: true }); break;
-    case 'stop': change = (s, me) => updatePlayback(s, me, now, { playing: false }); break;
-    case 'bpm': if (Number(rest[0]) > 0) change = (s, me) => updatePlayback(s, me, now, { bpm: Number(rest[0]) }); break;
-    case 'steps': if (Number(rest[0]) > 0) change = (s, me) => setSteps(s, me, Number(rest[0])); break;
-    case 'show': return show();
-    case 'offline': return node.goOffline(Number(rest[0] || 10));
-    case 'help': return console.log(HELP);
-    case 'quit': process.exit(0);
-    default: return console.log(`unknown command "${cmd}", try help`);
+    case 'mute':
+      if (!(key = track())) return;
+      change = (s, me) => setTrackStatus(s, me, key!, 'muted');
+      break;
+    case 'unmute':
+      if (!(key = track())) return;
+      change = (s, me) => setTrackStatus(s, me, key!, 'active');
+      break;
+    case 'del':
+      if (!(key = track())) return;
+      change = (s, me) => setTrackStatus(s, me, key!, 'deleted');
+      break;
+    case 'play':
+      change = (s, me) => updatePlayback(s, me, now, { playing: true });
+      break;
+    case 'stop':
+      change = (s, me) => updatePlayback(s, me, now, { playing: false });
+      break;
+    case 'bpm':
+      if (Number(rest[0]) > 0) change = (s, me) => updatePlayback(s, me, now, { bpm: Number(rest[0]) });
+      break;
+    case 'steps':
+      if (Number(rest[0]) > 0) change = (s, me) => setSteps(s, me, Number(rest[0]));
+      break;
+    case 'show':
+      return show();
+    case 'offline':
+      return node.goOffline(Number(rest[0] || 10));
+    case 'help':
+      return console.log(HELP);
+    case 'quit':
+      process.exit(0);
+    default:
+      return console.log(`unknown command "${cmd}", try help`);
   }
   if (!change || node.edit(change).length === 0) console.log('nothing changed (unknown track or step?)');
 }
@@ -121,4 +169,7 @@ console.log(`${node.opts.name} listening on UDP port ${args.port}. Others can jo
 for (const a of localAddresses()) console.log(`    --join ${a}:${args.port}`);
 console.log('type "help" for commands');
 if (args.audio) await startAudio(node, (l) => console.log(l));
-readline.createInterface({ input: process.stdin }).on('line', run).on('close', () => process.exit(0));
+readline
+  .createInterface({ input: process.stdin })
+  .on('line', run)
+  .on('close', () => process.exit(0));

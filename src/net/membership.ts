@@ -9,7 +9,12 @@ export const PEER_TIMEOUT_MS = 5000;
 
 export type MemberStatus = 'me' | 'alive' | 'gone' | 'not heard from';
 export type MemberView = {
-  id: NodeId; name: string; address: string | null; port: number; heartbeat: number; status: MemberStatus;
+  id: NodeId;
+  name: string;
+  address: string | null;
+  port: number;
+  heartbeat: number;
+  status: MemberStatus;
   /** For live members: how long ago their heartbeat last increased. */
   seenMsAgo?: number;
   /** For gone members: how long ago they timed out. */
@@ -24,7 +29,10 @@ export class Membership {
   /** When each member's heartbeat last increased, decided locally. */
   private liveness = new Map<NodeId, Liveness>();
 
-  constructor(private readonly me: NodeId, private readonly log: (line: string) => void) {}
+  constructor(
+    private readonly me: NodeId,
+    private readonly log: (line: string) => void,
+  ) {}
 
   /** Note the address a packet from `id` came from. */
   observe(id: NodeId, from: Address) {
@@ -39,7 +47,9 @@ export class Membership {
   /** Where to reach a member: the address its packets come from, or else the one in its entry. */
   addressOf(state: State, id: NodeId): Address | null {
     const entry = Object.hasOwn(state.members, id) ? state.members[id] : undefined;
-    return this.observed.get(id) ?? (entry?.value.address ? { address: entry.value.address, port: entry.value.port } : null);
+    return (
+      this.observed.get(id) ?? (entry?.value.address ? { address: entry.value.address, port: entry.value.port } : null)
+    );
   }
 
   /**
@@ -104,9 +114,15 @@ export class Membership {
     return Object.entries(state.members).map(([key, entry]) => {
       const id = Number(key);
       const l = this.liveness.get(id);
-      const status: MemberStatus = id === this.me ? 'me' : l?.alive ? 'alive' : l?.everAlive ? 'gone' : 'not heard from';
+      const status: MemberStatus =
+        id === this.me ? 'me' : l?.alive ? 'alive' : l?.everAlive ? 'gone' : 'not heard from';
       return {
-        id, name: entry.value.name, address: entry.value.address, port: entry.value.port, heartbeat: entry.stamp.ver, status,
+        id,
+        name: entry.value.name,
+        address: entry.value.address,
+        port: entry.value.port,
+        heartbeat: entry.stamp.ver,
+        status,
         seenMsAgo: l && status === 'alive' ? now - l.changedAt : undefined,
         goneForMs: l?.goneAt !== undefined && status === 'gone' ? now - l.goneAt : undefined,
       };

@@ -37,11 +37,19 @@ export function wellFormed(m: any): m is Msg {
   const num = (x: unknown) => typeof x === 'number' && Number.isFinite(x);
   const hasTo = typeof m.to?.address === 'string' && Number.isInteger(m.to.port);
   switch (m.type) {
-    case 'JOIN': return hasTo;
-    case 'STATE': return hasTo && isState(m.state);
-    case 'ELECTION': case 'ANSWER': case 'COORDINATOR': return true;
-    case 'TIME_REQUEST': return num(m.t0);
-    case 'TIME_REPLY': return num(m.t0) && num(m.t1) && num(m.t2);
-    default: return false;
+    case 'JOIN':
+      return hasTo;
+    case 'STATE':
+      return hasTo && isState(m.state);
+    case 'ELECTION':
+    case 'ANSWER':
+    case 'COORDINATOR':
+      return true;
+    case 'TIME_REQUEST':
+      return num(m.t0);
+    case 'TIME_REPLY':
+      return num(m.t0) && num(m.t1) && num(m.t2);
+    default:
+      return false;
   }
 }

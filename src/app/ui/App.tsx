@@ -2,13 +2,33 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import type { PeerNode } from '../../net/node.js';
-import { addTrack, playheadAt, setSteps, setTrackStatus, toggleCell, updatePlayback, type State, type Track } from '../../state/state.js';
+import {
+  addTrack,
+  playheadAt,
+  setSteps,
+  setTrackStatus,
+  toggleCell,
+  updatePlayback,
+  type State,
+  type Track,
+} from '../../state/state.js';
 import { PRESETS } from '../../audio/presets.js';
 import type { AudioEngine } from '../../audio/engine.js';
 import { presetKey } from '../../samples/keys.js';
 import { addSampleFile } from '../../samples/addfile.js';
 import { localAddresses } from '../cli.js';
-import { BANNER, BANNER_COLORS, CELL_WIDTH, CONTROL_ROW_STEP, LABEL_WIDTH, PAD, TRACKS_ROW, controlRows, hitTest, type Action } from './layout.js';
+import {
+  BANNER,
+  BANNER_COLORS,
+  CELL_WIDTH,
+  CONTROL_ROW_STEP,
+  LABEL_WIDTH,
+  PAD,
+  TRACKS_ROW,
+  controlRows,
+  hitTest,
+  type Action,
+} from './layout.js';
 import { useMouseClicks } from './mouse.js';
 import { HelpLine, StepRow, labels } from './components.js';
 import type { LogBuffer } from './log.js';
@@ -103,17 +123,36 @@ export function App({ node, logs, audio, audioOff, port, clearScreen }: AppProps
   const run = (action: Action) => {
     const now = node.now();
     switch (action) {
-      case 'play': node.edit((s, me) => updatePlayback(s, me, now, { playing: !playing })); break;
-      case 'bpmDown': node.edit((s, me) => updatePlayback(s, me, now, { bpm: Math.max(20, bpm - 5) })); break;
-      case 'bpmUp': node.edit((s, me) => updatePlayback(s, me, now, { bpm: Math.min(300, bpm + 5) })); break;
-      case 'stepsDown': node.edit((s, me) => setSteps(s, me, steps - 1)); break;
-      case 'stepsUp': node.edit((s, me) => setSteps(s, me, steps + 1)); break;
-      case 'add': setAdding(true); break;
-      case 'mute':
-        if (selected) node.edit((s, me) => setTrackStatus(s, me, selected[0], selected[1].status.value === 'muted' ? 'active' : 'muted'));
+      case 'play':
+        node.edit((s, me) => updatePlayback(s, me, now, { playing: !playing }));
         break;
-      case 'delete': if (selected) setDeleting(selected[0]); break;
-      case 'quit': exit(); break;
+      case 'bpmDown':
+        node.edit((s, me) => updatePlayback(s, me, now, { bpm: Math.max(20, bpm - 5) }));
+        break;
+      case 'bpmUp':
+        node.edit((s, me) => updatePlayback(s, me, now, { bpm: Math.min(300, bpm + 5) }));
+        break;
+      case 'stepsDown':
+        node.edit((s, me) => setSteps(s, me, steps - 1));
+        break;
+      case 'stepsUp':
+        node.edit((s, me) => setSteps(s, me, steps + 1));
+        break;
+      case 'add':
+        setAdding(true);
+        break;
+      case 'mute':
+        if (selected)
+          node.edit((s, me) =>
+            setTrackStatus(s, me, selected[0], selected[1].status.value === 'muted' ? 'active' : 'muted'),
+          );
+        break;
+      case 'delete':
+        if (selected) setDeleting(selected[0]);
+        break;
+      case 'quit':
+        exit();
+        break;
     }
   };
 
@@ -174,14 +213,14 @@ export function App({ node, logs, audio, audioOff, port, clearScreen }: AppProps
     else if ((input === '<' || input === '>') && audio) {
       audio.setVolume(audio.volume + (input === '>' ? 0.1 : -0.1));
       rerender();
-    }
-    else if (input === 'q' || key.escape) run('quit');
+    } else if (input === 'q' || key.escape) run('quit');
   });
 
   const reachable = node.myAddress ?? localAddresses().find((a) => !a.startsWith('127.')) ?? '127.0.0.1';
   const sync = node.sync();
   const order = { me: 0, alive: 1, gone: 2, 'not heard from': 3 };
-  const members = node.members()
+  const members = node
+    .members()
     .filter((m) => m.status !== 'not heard from' && !(m.status === 'gone' && (m.goneForMs ?? 0) > GONE_SHOWN_MS))
     .sort((a, b) => order[a.status] - order[b.status] || a.name.localeCompare(b.name));
   const label = labels(members);
@@ -235,7 +274,10 @@ export function App({ node, logs, audio, audioOff, port, clearScreen }: AppProps
       </Box>
       <Box marginTop={1}>
         <Box width={LABEL_WIDTH} />
-        <StepRow steps={steps} cell={(s) => <Text dimColor>{s % 4 === 0 ? String(s + 1).padEnd(CELL_WIDTH) : '   '}</Text>} />
+        <StepRow
+          steps={steps}
+          cell={(s) => <Text dimColor>{s % 4 === 0 ? String(s + 1).padEnd(CELL_WIDTH) : '   '}</Text>}
+        />
       </Box>
       {tracks.length === 0 && <Text dimColor>(no tracks yet: press a or click Add track)</Text>}
       {tracks.map(([hash, t], i) => {
@@ -244,7 +286,8 @@ export function App({ node, logs, audio, audioOff, port, clearScreen }: AppProps
           <Box key={hash}>
             <Box width={LABEL_WIDTH}>
               <Text bold={i === cur.track} dimColor={muted} wrap="truncate-end">
-                {t.name.value.slice(0, 9).padEnd(9)}{muted ? 'M' : node.hasSound(hash) ? ' ' : '↓'}
+                {t.name.value.slice(0, 9).padEnd(9)}
+                {muted ? 'M' : node.hasSound(hash) ? ' ' : '↓'}
               </Text>
             </Box>
             <StepRow
@@ -277,7 +320,9 @@ export function App({ node, logs, audio, audioOff, port, clearScreen }: AppProps
             <Box>
               <Text>Sample file: </Text>
               {/* a long path loses its start, so the end being typed stays visible */}
-              <Text wrap="truncate-start" color="cyan">{filePath}</Text>
+              <Text wrap="truncate-start" color="cyan">
+                {filePath}
+              </Text>
               <Text inverse> </Text>
             </Box>
             <Text dimColor>any audio file up to 5 MB · Enter adds · Esc cancels</Text>
@@ -290,17 +335,41 @@ export function App({ node, logs, audio, audioOff, port, clearScreen }: AppProps
               const present = Object.hasOwn(state.tracks, k) && state.tracks[k].status.value !== 'deleted';
               return (
                 <Text key={p}>
-                  <Text color="yellow" bold>{i + 1}</Text> <Text dimColor={present}>{p}</Text>{'  '}
+                  <Text color="yellow" bold>
+                    {i + 1}
+                  </Text>{' '}
+                  <Text dimColor={present}>{p}</Text>
+                  {'  '}
                 </Text>
               );
             })}
-            <Text color="yellow" bold>f</Text> file…{'  '}
+            <Text color="yellow" bold>
+              f
+            </Text>{' '}
+            file…{'  '}
             <Text dimColor>(any other key cancels)</Text>
           </Text>
         ) : (
           <>
-            <HelpLine items={[['click', 'cells and buttons'], ['arrows', 'move'], ['space', 'toggle'], ['m', 'mute'], ['d', 'delete']]} />
-            <HelpLine items={[['p', 'play/stop'], ['+/-', 'tempo'], ['[ ]', 'steps'], ['a', 'add track'], ['< >', 'volume'], ['q', 'quit']]} />
+            <HelpLine
+              items={[
+                ['click', 'cells and buttons'],
+                ['arrows', 'move'],
+                ['space', 'toggle'],
+                ['m', 'mute'],
+                ['d', 'delete'],
+              ]}
+            />
+            <HelpLine
+              items={[
+                ['p', 'play/stop'],
+                ['+/-', 'tempo'],
+                ['[ ]', 'steps'],
+                ['a', 'add track'],
+                ['< >', 'volume'],
+                ['q', 'quit'],
+              ]}
+            />
           </>
         )}
       </Box>
@@ -309,8 +378,8 @@ export function App({ node, logs, audio, audioOff, port, clearScreen }: AppProps
         <Text bold>Members</Text>
         {shownMembers.map((m) => (
           <Text key={m.id} wrap="truncate-end">
-            <Text color={m.status === 'gone' ? 'red' : 'green'}>{m.status === 'gone' ? '○' : '●'}</Text> {label.get(m.id)}{' '}
-            <Text dimColor>{m.status === 'me' ? '(me)' : m.status === 'gone' ? '(gone)' : ''}</Text>
+            <Text color={m.status === 'gone' ? 'red' : 'green'}>{m.status === 'gone' ? '○' : '●'}</Text>{' '}
+            {label.get(m.id)} <Text dimColor>{m.status === 'me' ? '(me)' : m.status === 'gone' ? '(gone)' : ''}</Text>
             {m.id === sync.reference && <Text color="yellow"> time reference</Text>}
           </Text>
         ))}
@@ -324,8 +393,8 @@ export function App({ node, logs, audio, audioOff, port, clearScreen }: AppProps
             ? 'Clock: this node is the time reference'
             : sync.reference === null
               ? 'Clock: no time reference yet'
-              : `Clock: ${sync.synced ? 'synced' : 'syncing'} to ${sync.referenceName}, offset ${sync.offsetMs.toFixed(1)} ms`
-                + (sync.delayMs === null ? '' : `, round trip ${sync.delayMs.toFixed(1)} ms`)}
+              : `Clock: ${sync.synced ? 'synced' : 'syncing'} to ${sync.referenceName}, offset ${sync.offsetMs.toFixed(1)} ms` +
+                (sync.delayMs === null ? '' : `, round trip ${sync.delayMs.toFixed(1)} ms`)}
         </Text>
         <Text dimColor wrap="truncate-end">
           {audio

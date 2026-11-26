@@ -11,7 +11,8 @@ export function describeChanges(before: State, after: State): string[] {
   const steps = after.settings.steps;
   if (steps !== before.settings.steps) out.push(`step count set to ${steps.value} ${by(steps.stamp)}`);
   const pb = after.playback;
-  if (pb !== before.playback) out.push(`${pb.value.playing ? 'playing' : 'stopped'} at ${pb.value.bpm} BPM ${by(pb.stamp)}`);
+  if (pb !== before.playback)
+    out.push(`${pb.value.playing ? 'playing' : 'stopped'} at ${pb.value.bpm} BPM ${by(pb.stamp)}`);
 
   for (const [hash, track] of Object.entries(after.tracks)) {
     const name = track.name.value;
@@ -63,7 +64,9 @@ export function renderGrid(s: State, now: number): string[] {
     Array.from({ length: steps }, (_, i) => cell(i) + (i % 4 === 3 ? ' ' : '')).join('');
   const width = Math.max(8, ...tracks.map((t) => t.name.value.length)); // names are at most 16 characters
   for (const t of tracks) {
-    lines.push(`${t.name.value.padEnd(width)} ${t.status.value.padEnd(7)} ${row((i) => (t.cells[i].value ? 'x' : '.'))}`);
+    lines.push(
+      `${t.name.value.padEnd(width)} ${t.status.value.padEnd(7)} ${row((i) => (t.cells[i].value ? 'x' : '.'))}`,
+    );
   }
   lines.push(`${''.padEnd(width + 9)}${row((i) => (i === head ? '^' : ' '))}`);
   return lines;
