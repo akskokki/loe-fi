@@ -41,6 +41,7 @@ if ('error' in chosen) {
 
 const LOG_LINES = 8; // at most; fewer when the terminal is short
 const MAX_MEMBERS_SHOWN = 6; // the rest are summed up in one line
+const GONE_SHOWN_MS = 5000; // a member that timed out is listed as gone this long, then left out
 const logLines: string[] = [];
 const logListeners = new Set<() => void>();
 let logFile: fs.WriteStream | undefined;
@@ -268,6 +269,12 @@ function App() {
     };
   }, []);
 
+  // Redraw once a second, so gone members drop off the list on time even when nothing else changes.
+  useEffect(() => {
+    const id = setInterval(rerender, 1000);
+    return () => clearInterval(id);
+  }, []);
+
   // Recompute the playhead ~30x/s from session time; React skips the redraw when it is unchanged.
   useEffect(() => {
     const id = setInterval(() => setPlayhead(playheadAt(node.state, node.now())), 33);
@@ -372,20 +379,19 @@ function App() {
   const sync = node.sync();
   const order = { me: 0, alive: 1, gone: 2, 'not heard from': 3 };
   const members = node.members()
-    .filter((m) => m.status !== 'not heard from')
+    .filter((m) => m.status !== 'not heard from' && !(m.status === 'gone' && (m.goneForMs ?? 0) > GONE_SHOWN_MS))
     .sort((a, b) => order[a.status] - order[b.status] || a.name.localeCompare(b.name));
-  const hidden = node.members().length - members.length;
   const label = labels(members);
   // Ink can only redraw in place while the whole UI fits in the terminal, so the parts below the
   // grid get the space that is left: the log shrinks and disappears first, then the member list
   // (down to this node plus an "… and N more" line), and anything else is clipped at the bottom.
   const top = PAD + TRACKS_ROW + Math.max(1, tracks.length) + 1 + 3; // through the grid, playhead row and help
-  const memberRoom = rows - 1 - top - PAD - 4 - (hidden > 0 ? 1 : 0); // 4: blank, "Members", clock, audio
+  const memberRoom = rows - 1 - top - PAD - 4; // 4: blank, "Members", clock, audio
   let showCount = Math.min(members.length, MAX_MEMBERS_SHOWN, Math.max(1, memberRoom));
   if (showCount < members.length) showCount = Math.max(1, Math.min(showCount, memberRoom - 1)); // room for "… and N more"
   const shownMembers = members.slice(0, showCount);
   const moreMembers = members.length - shownMembers.length;
-  const linesAboveLog = top + 2 + shownMembers.length + (moreMembers > 0 ? 1 : 0) + 2 + (hidden > 0 ? 1 : 0);
+  const linesAboveLog = top + 2 + shownMembers.length + (moreMembers > 0 ? 1 : 0) + 2;
   const logRoom = Math.min(LOG_LINES, rows - 1 - linesAboveLog - 2 - PAD); // 2: blank line and "Log" title
   const shownLog = logRoom > 0 ? logLines.slice(-logRoom) : [];
 
@@ -523,7 +529,6 @@ function App() {
             ? `Audio: on, volume ${Math.round(audio.volume * 100)}%, output latency ${audio.latencyMs.toFixed(0)} ms (corrected for)`
             : `Audio: off (${audioOff})`}
         </Text>
-        {hidden > 0 && <Text dimColor>{hidden} earlier member(s) not heard from</Text>}
       </Box>
 
       {shownLog.length > 0 && (

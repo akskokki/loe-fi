@@ -29,7 +29,13 @@ const RETRY_HOLDER_MS = 10_000; // after a failed fetch, ask other holders befor
 const RETRY_BUSY_MS = 1000; // ... but a holder that was only busy uploading can be asked again soon // also send to gone members on every 5th tick, so a healed network split reconnects
 
 export type MemberStatus = 'me' | 'alive' | 'gone' | 'not heard from';
-export type MemberView = { id: NodeId; name: string; address: string | null; port: number; heartbeat: number; status: MemberStatus; seenMsAgo?: number };
+export type MemberView = {
+  id: NodeId; name: string; address: string | null; port: number; heartbeat: number; status: MemberStatus;
+  /** For live members: how long ago their heartbeat last increased. */
+  seenMsAgo?: number;
+  /** For gone members: how long ago they timed out. */
+  goneForMs?: number;
+};
 
 export type NodeOptions = {
   /** Display name shown to the other members. Must pass isValidName(). */
@@ -115,7 +121,7 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
   /** Where packets from each node actually came from. Preferred over the address in its member entry. */
   private observed = new Map<NodeId, Address>();
   /** When each member's heartbeat last increased, decided locally. */
-  private liveness = new Map<NodeId, { ver: number; changedAt: number; alive: boolean; everAlive: boolean }>();
+  private liveness = new Map<NodeId, { ver: number; changedAt: number; alive: boolean; everAlive: boolean; goneAt?: number }>();
   /** Until this time, drop all packets in both directions (for testing failures). */
   private offlineUntil = 0;
   private timer: ReturnType<typeof setInterval> | undefined;
@@ -246,6 +252,7 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
       return {
         id, name: entry.value.name, address: entry.value.address, port: entry.value.port, heartbeat: entry.stamp.ver, status,
         seenMsAgo: l && status === 'alive' ? now - l.changedAt : undefined,
+        goneForMs: l?.goneAt !== undefined && status === 'gone' ? now - l.goneAt : undefined,
       };
     });
   }
@@ -490,6 +497,7 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
         this.liveness.set(id, { ver, changedAt: now, alive: true, everAlive: true });
       } else if (known.alive && now - known.changedAt > PEER_TIMEOUT_MS) {
         known.alive = false;
+        known.goneAt = now;
         changed = true;
         this.log(`- member ${where} timed out`);
       }
