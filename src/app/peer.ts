@@ -9,13 +9,13 @@
 //   add --audio to play the grid (the UI plays it by default)
 import readline from 'node:readline';
 import { parseArgs } from 'node:util';
-import { PeerNode, chooseName, localAddresses, parseAddress } from './node.js';
-import { MAX_STEPS, addTrack, fingerprint, setSteps, setTrackStatus, toggleCell, updatePlayback, type NodeId, type State } from './state.js';
-import { renderGrid } from './describe.js';
-import { PRESETS, isPreset } from './presets.js';
-import { findTrack, presetKey } from './tracks.js';
-import { addSampleFile } from './addfile.js';
-import { AudioEngine } from './audio.js';
+import { PeerNode, chooseName, localAddresses, parseAddress } from '../net/node.js';
+import { MAX_STEPS, addTrack, fingerprint, setSteps, setTrackStatus, toggleCell, updatePlayback, type NodeId, type State } from '../state/state.js';
+import { renderGrid } from '../state/describe.js';
+import { PRESETS, isPreset } from '../audio/presets.js';
+import { findTrack, presetKey } from '../samples/keys.js';
+import { addSampleFile } from '../samples/addfile.js';
+import { AudioEngine } from '../audio/engine.js';
 
 const { values: args } = parseArgs({
   options: {

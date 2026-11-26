@@ -26,11 +26,11 @@
 // that isn't deleted. Exits with code 0 if so, 1 if not.
 import fs from 'node:fs';
 import { parseArgs } from 'node:util';
-import { PeerNode } from './node.js';
+import { PeerNode } from '../net/node.js';
 import {
   addTrack, fingerprint, setSteps, setTrackStatus, toggleCell, updatePlayback,
   type NodeId, type State, type TrackStatus,
-} from './state.js';
+} from '../state/state.js';
 
 const { values: args } = parseArgs({
   options: {

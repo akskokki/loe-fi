@@ -12,7 +12,7 @@
 // - The reference repeats COORDINATOR every ANNOUNCE_EVERY_MS, for lost messages and new members.
 // - A node only takes over from a lower reference once `canLead()` says so (its clock is synced),
 //   so a freshly joined node never becomes the reference with an unsynced clock.
-import type { NodeId } from './state.js';
+import type { NodeId } from '../state/state.js';
 
 export type ElectionMsgType = 'ELECTION' | 'ANSWER' | 'COORDINATOR';
 

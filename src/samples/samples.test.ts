@@ -7,9 +7,9 @@ import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { SampleStore, MAX_SAMPLE_BYTES, sha256 } from './store.js';
 import { fetchSample, serveSamples } from './transfer.js';
-import { findTrack, soundOf } from './tracks.js';
+import { findTrack, soundOf } from './keys.js';
 import { trackNameFor } from './addfile.js';
-import { addTrack, emptyState, setTrackStatus } from './state.js';
+import { addTrack, emptyState, setTrackStatus } from '../state/state.js';
 
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'lofi-test-'));
 const HASH = 'a'.repeat(64);

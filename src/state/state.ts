@@ -21,7 +21,7 @@
 // All functions are pure: they return a new state and never modify their arguments.
 
 import { createHash } from 'node:crypto';
-import { isHash } from './tracks.js';
+import { isHash } from '../samples/keys.js';
 
 export type NodeId = number;
 

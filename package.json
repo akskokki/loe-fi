@@ -6,11 +6,11 @@
     "node": ">=22"
   },
   "scripts": {
-    "peer": "tsx src/peer.ts",
+    "peer": "tsx src/app/peer.ts",
     "check": "tsc --noEmit",
-    "test": "tsx --test src/*.test.ts",
-    "ui": "tsx src/ui.tsx",
-    "harness": "tsx src/harness.ts"
+    "test": "tsx --test \"src/**/*.test.ts\"",
+    "ui": "tsx src/app/ui/main.tsx",
+    "harness": "tsx src/tools/harness.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

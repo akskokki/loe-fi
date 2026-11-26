@@ -1,6 +1,6 @@
 // Messages between peer nodes. Each message is one JSON-encoded UDP datagram.
 // File request messages come later.
-import type { NodeId, State } from './state.js';
+import type { NodeId, State } from '../state/state.js';
 
 export type Address = { address: string; port: number };
 

@@ -10,7 +10,7 @@
 // The receiver checks the bytes against the hash before keeping them (store.ts).
 import net from 'node:net';
 import { MAX_SAMPLE_BYTES, type SampleStore } from './store.js';
-import { isHash } from './tracks.js';
+import { isHash } from './keys.js';
 
 /** The plan: "A node can limit its concurrent uploads so it does not block on sequencer messages." */
 export const MAX_UPLOADS = 2;

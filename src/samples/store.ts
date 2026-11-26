@@ -4,7 +4,7 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { isHash } from './tracks.js';
+import { isHash } from './keys.js';
 
 /** The design plan's "maximum of a few megabytes". */
 export const MAX_SAMPLE_BYTES = 5 * 1024 * 1024;

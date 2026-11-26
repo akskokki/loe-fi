@@ -1,5 +1,5 @@
 // Which steps play when, in session time. Pure, so it can be tested without audio.
-import { stepDurationMs, type State } from './state.js';
+import { stepDurationMs, type State } from '../state/state.js';
 
 export type Hit = {
   /** Steps since the playback anchor (the step that was playing at `playback.at`). */

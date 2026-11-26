@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { stepsBetween } from './schedule.js';
-import { addTrack, emptyState, playheadAt, setTrackStatus, toggleCell, updatePlayback, type State } from './state.js';
+import { addTrack, emptyState, playheadAt, setTrackStatus, toggleCell, updatePlayback, type State } from '../state/state.js';
 
 const ME = 1;
 

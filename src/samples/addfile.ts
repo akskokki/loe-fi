@@ -1,9 +1,9 @@
 // Adding a sample file from disk as a new track, shared by the UI and the headless peer.
 import fs from 'node:fs';
 import path from 'node:path';
-import { AudioEngine } from './audio.js';
-import type { PeerNode } from './node.js';
-import { MAX_NAME_LENGTH, isValidName } from './state.js';
+import { AudioEngine } from '../audio/engine.js';
+import type { PeerNode } from '../net/node.js';
+import { MAX_NAME_LENGTH, isValidName } from '../state/state.js';
 import { MAX_SAMPLE_BYTES } from './store.js';
 
 /**

@@ -11,7 +11,7 @@ Status: **proposed** means it's in the code but the group hasn't confirmed it ye
 ### Tempo, play/stop and playhead position are one value · proposed
 
 - **Plan:** *Settings* has Tempo and Steps, each with its own version stamp. *Playback* has Playing and Playhead ("step 8 at 2500 ms"), also each with its own stamp. That is four separately merged values.
-- **Code:** *Settings* has only `steps`. `playback` is one value `{playing, bpm, step, at}` with a single stamp (`src/state.ts`), so play/stop, tempo and playhead position always change together.
+- **Code:** *Settings* has only `steps`. `playback` is one value `{playing, bpm, step, at}` with a single stamp (`src/state/state.ts`), so play/stop, tempo and playhead position always change together.
 - **Why:** the plan says a tempo change or play/stop also moves the playhead position. With separate stamps, two nodes acting at the same moment (A presses play while B changes the tempo) can merge into A's position combined with B's tempo, which makes the playhead jump.
 - **Cost:** when two nodes change playback at the same moment, one change is lost completely. Either A's play or B's tempo change survives, not both.
 
@@ -31,14 +31,14 @@ Status: **proposed** means it's in the code but the group hasn't confirmed it ye
 ### Member entries carry a display name · proposed
 
 - **Plan:** a member entry has Node ID, Address, Samples held and Heartbeat.
-- **Code:** the entry also has `name`, chosen with `--name` (default: the OS user name). It is 1–16 printable characters (`isValidName` in `src/state.ts`), and a STATE with an invalid name is ignored. Names don't have to be unique. The UI, `show` and the log display names instead of node IDs.
+- **Code:** the entry also has `name`, chosen with `--name` (default: the OS user name). It is 1–16 printable characters (`isValidName` in `src/state/state.ts`), and a STATE with an invalid name is ignored. Names don't have to be unique. The UI, `show` and the log display names instead of node IDs.
 - **Why:** node IDs are random numbers, so people can't tell who is who.
 - **Note:** names come from the network and get printed to the terminal, so control characters are refused to keep escape sequences out.
 
 ### Member entries are never removed · proposed
 
 - **Plan:** "the other nodes consider that member gone". The plan doesn't say what happens to the entry.
-- **Code:** entries stay in the state forever. Each node decides locally that a member is gone when its heartbeat has not increased for 5 s (`src/node.ts`). A member counts as alive only after its heartbeat has been seen increasing, so entries of peers that quit long ago, such as a restarted node's previous run, stay silent.
+- **Code:** entries stay in the state forever. Each node decides locally that a member is gone when its heartbeat has not increased for 5 s (`src/net/node.ts`). A member counts as alive only after its heartbeat has been seen increasing, so entries of peers that quit long ago, such as a restarted node's previous run, stay silent.
 - **Why:** if a node deleted an entry, the next STATE from any node that still had it would bring it back. Real removal would need tombstones or every node remembering which IDs it dropped.
 - **Cost:** the members list grows with every restart.
 
@@ -52,7 +52,7 @@ Status: **proposed** means it's in the code but the group hasn't confirmed it ye
 ### STATE and JOIN carry a `to` field, and nodes learn their own address from it · proposed
 
 - **Plan:** the STATE header is the sender's node ID. The member entry holds the node's address, but the plan doesn't say how a node knows it.
-- **Code:** STATE is `{type, from, to, state}` and JOIN is `{type, from, to}` (`src/messages.ts`). `to` is the address the sender sent the message to, so a node learns its address from the first JOIN or STATE it gets. The receiver writes it into its own member entry, preferring a non-loopback address once it has seen one. The address is `null` until the node has learned it.
+- **Code:** STATE is `{type, from, to, state}` and JOIN is `{type, from, to}` (`src/net/messages.ts`). `to` is the address the sender sent the message to, so a node learns its address from the first JOIN or STATE it gets. The receiver writes it into its own member entry, preferring a non-loopback address once it has seen one. The address is `null` until the node has learned it.
 - **Why:** a node often can't tell which of its addresses others can reach it at, because of several network interfaces, VMs or Docker.
 - **Also:** for nodes that have sent us packets, we send to the address their packets come from, not the address in their member entry.
 
@@ -83,9 +83,9 @@ Status: **proposed** means it's in the code but the group hasn't confirmed it ye
 
 - **Plan:** members add their own sample files. A track is identified by the hash of its sample, each member lists the samples it holds, and a node missing a sample pulls it from another member over TCP.
 - **Decision:** file sharing stays as planned, and the program also comes with a few preset sounds, so someone starting it for the first time has sounds without any files. Presets need no transfer, since every node has them.
-- **Code:** a track key is either `preset:<name>` (`src/presets.ts`: kick, snare, hat, clap, tom) or `sha256:<hash>` for a sample file (`src/tracks.ts`). Presets are synthesized on each machine, with some random noise in them, so they can't be identified by a hash; they never need transferring anyway.
+- **Code:** a track key is either `preset:<name>` (`src/audio/presets.ts`: kick, snare, hat, clap, tom) or `sha256:<hash>` for a sample file (`src/samples/keys.ts`). Presets are synthesized on each machine, with some random noise in them, so they can't be identified by a hash; they never need transferring anyway.
 
-The file sharing itself follows the plan: samples are stored under their SHA-256 hash (`src/store.ts`), each member lists the hashes it holds in its member entry, and a node pulls a missing sample over TCP from a member that lists it, checks it against the hash, and asks another member if the transfer fails (`src/transfer.ts`). The details the plan leaves open:
+The file sharing itself follows the plan: samples are stored under their SHA-256 hash (`src/samples/store.ts`), each member lists the hashes it holds in its member entry, and a node pulls a missing sample over TCP from a member that lists it, checks it against the hash, and asks another member if the transfer fails (`src/samples/transfer.ts`). The details the plan leaves open:
 
 ### Transfer details · proposed
 
@@ -106,7 +106,7 @@ The file sharing itself follows the plan: samples are stored under their SHA-256
 
 ## Playhead synchronization
 
-The plan's approach is built: the live node with the highest ID is elected time reference with the bully algorithm (`src/election.ts`), the others sync to it with NTP-style round trips (`src/clock.ts`), and `PeerNode.now()` returns session time. The departures:
+The plan's approach is built: the live node with the highest ID is elected time reference with the bully algorithm (`src/sync/election.ts`), the others sync to it with NTP-style round trips (`src/sync/clock.ts`), and `PeerNode.now()` returns session time. The departures:
 
 ### Session time is a local monotonic clock plus an offset · proposed
 

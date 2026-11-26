@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AudioEngine } from './audio.js';
-import { addTrack, emptyState, toggleCell, updatePlayback } from './state.js';
+import { AudioEngine } from './engine.js';
+import { addTrack, emptyState, toggleCell, updatePlayback } from '../state/state.js';
 
 /** Just enough of an AudioContext for the engine; records when each sound would start. */
 function fakeContext(outputLatency: number) {

@@ -2,7 +2,7 @@
 // every node can render every preset, so no sound is ever sent over the network.
 //
 // The sounds are synthesized (from the tui-sequencer prototype) rather than loaded from files.
-// This module only computes samples; audio.ts turns them into buffers and plays them.
+// This module only computes samples; engine.ts turns them into buffers and plays them.
 
 export const PRESETS = ['kick', 'snare', 'hat', 'clap', 'tom'] as const;
 export type Preset = (typeof PRESETS)[number];

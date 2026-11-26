@@ -12,12 +12,12 @@ import fs from 'node:fs';
 import { parseArgs } from 'node:util';
 import { useEffect, useReducer, useRef, useState, type ReactNode } from 'react';
 import { render, Box, Text, useApp, useInput } from 'ink';
-import { PeerNode, chooseName, localAddresses, parseAddress, type MemberView } from './node.js';
-import { addTrack, playheadAt, setSteps, setTrackStatus, toggleCell, updatePlayback, type Track } from './state.js';
-import { PRESETS } from './presets.js';
-import { presetKey } from './tracks.js';
-import { addSampleFile } from './addfile.js';
-import { AudioEngine } from './audio.js';
+import { PeerNode, chooseName, localAddresses, parseAddress, type MemberView } from '../../net/node.js';
+import { addTrack, playheadAt, setSteps, setTrackStatus, toggleCell, updatePlayback, type Track } from '../../state/state.js';
+import { PRESETS } from '../../audio/presets.js';
+import { presetKey } from '../../samples/keys.js';
+import { addSampleFile } from '../../samples/addfile.js';
+import { AudioEngine } from '../../audio/engine.js';
 
 const { values: args } = parseArgs({
   options: {

@@ -1,7 +1,7 @@
 import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { ANSWER_TIMEOUT_MS, COORDINATOR_TIMEOUT_MS, INITIAL_WAIT_MS, Election, type ElectionMsgType } from './election.js';
-import type { NodeId } from './state.js';
+import type { NodeId } from '../state/state.js';
 
 /** An Election for node `me` with fake members and a record of what it sent. */
 function setup(t: TestContext, me: NodeId, live: NodeId[], opts: { canLead?: () => boolean } = {}) {

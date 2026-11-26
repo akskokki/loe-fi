@@ -12,8 +12,8 @@
 import type { AudioContext as Ctx, AudioBuffer as Buf, GainNode } from 'node-web-audio-api';
 import { PRESETS, renderPreset } from './presets.js';
 import { stepsBetween } from './schedule.js';
-import type { State } from './state.js';
-import { presetKey, soundOf } from './tracks.js';
+import type { State } from '../state/state.js';
+import { presetKey, soundOf } from '../samples/keys.js';
 
 const TICK_MS = 25;
 const LOOKAHEAD_MS = 100;

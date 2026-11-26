@@ -1,5 +1,5 @@
 // A peer node: holds a copy of the session state and keeps it in sync with the other members over
-// UDP. Used by both the headless peer (peer.ts) and the terminal UI (ui.tsx).
+// UDP. Used by both the headless peer (app/peer.ts) and the terminal UI (app/ui).
 //
 // Protocol (see messages.ts): a joining node sends JOIN to one member, which answers with STATE.
 // Every node sends its whole state to all live members after each local change and once a second.
@@ -10,13 +10,13 @@ import dns from 'node:dns/promises';
 import { EventEmitter } from 'node:events';
 import os from 'node:os';
 import type { Address, Msg } from './messages.js';
-import { MAX_NAME_LENGTH, addTrack, emptyState, heartbeat, isState, isValidName, memberName, merge, type NodeId, type State } from './state.js';
-import { describeChanges } from './describe.js';
-import { Clock } from './clock.js';
-import { Election } from './election.js';
-import { SampleStore } from './store.js';
-import { fetchSample, serveSamples } from './transfer.js';
-import { sampleKey, soundOf } from './tracks.js';
+import { MAX_NAME_LENGTH, addTrack, emptyState, heartbeat, isState, isValidName, memberName, merge, type NodeId, type State } from '../state/state.js';
+import { describeChanges } from '../state/describe.js';
+import { Clock } from '../sync/clock.js';
+import { Election } from '../sync/election.js';
+import { SampleStore } from '../samples/store.js';
+import { fetchSample, serveSamples } from '../samples/transfer.js';
+import { sampleKey, soundOf } from '../samples/keys.js';
 import type net from 'node:net';
 
 const SEND_INTERVAL_MS = 1000;

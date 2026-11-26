@@ -5,8 +5,8 @@
 //                    don't have it pull it from a member that does (transfer.ts)
 //
 // Two people adding the same file get the same key, and so the same track.
-import { isPreset, type Preset } from './presets.js';
-import type { State } from './state.js';
+import { isPreset, type Preset } from '../audio/presets.js';
+import type { State } from '../state/state.js';
 
 export const presetKey = (p: Preset) => `preset:${p}`;
 export const sampleKey = (hash: string) => `sha256:${hash}`;

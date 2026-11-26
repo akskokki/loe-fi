@@ -4,22 +4,17 @@ Real-time multiplayer drum sequencer. Design: [docs/design-plan.tex](docs/design
 
 ## Code
 
-| File | What |
-|---|---|
-| `src/state.ts` | The global state (every value has a version stamp), `merge()`, and the functions that change the state |
-| `src/messages.ts` | The JOIN and STATE messages |
-| `src/node.ts` | A peer node: keeps its copy of the state in sync with the other members over UDP |
-| `src/ui.tsx` | Terminal UI with a live grid (`npm run ui`) |
-| `src/peer.ts` | Headless peer that takes typed commands (`npm run peer`), for VMs and scripted tests |
-| `src/describe.ts` | Log lines for what changed, and the grid as text |
-| `src/state.test.ts` | Tests for the merge rule (`npm test`) |
-| `src/election.ts` | Bully election of the time reference |
-| `src/clock.ts` | Session time, synced to the time reference NTP-style |
-| `src/presets.ts` | The preset sounds (synthesized): kick, snare, hat, clap, tom |
-| `src/tracks.ts` | Track keys: `preset:<name>` or `sha256:<hash of a sample file>` |
-| `src/store.ts`, `src/transfer.ts`, `src/addfile.ts` | Sample files: stored by hash, pulled from other members over TCP, added from disk |
-| `src/schedule.ts`, `src/audio.ts` | Which steps sound when, and the audio engine that plays them in session time |
-| `src/harness.ts` | Convergence test over the network code (`npm run harness`) |
+`src/` is grouped by the sections of the design plan. Tests sit next to the code they cover (`*.test.ts`).
+
+| Folder | Design plan section | What |
+|---|---|---|
+| `src/state/` | Global state and consistency | The state with a version stamp on every value, `merge()`, the edit functions, and text output for logs and `show` |
+| `src/net/` | Architecture, joining, fault tolerance | `PeerNode`: keeps the state in sync with the other members over UDP; the message types |
+| `src/sync/` | Playhead synchronization | Bully election of the time reference (`election.ts`) and session time synced to it (`clock.ts`) |
+| `src/samples/` | File sharing | Track keys (`preset:<name>` or `sha256:<hash>`), the sample store, TCP transfer, adding files from disk |
+| `src/audio/` | | Preset sounds, which steps sound when, and the audio engine that plays them in session time |
+| `src/app/` | | The programs: the terminal UI (`npm run ui`) and the headless peer (`npm run peer`) |
+| `src/tools/` | | The convergence test harness (`npm run harness`) |
 
 `npm test` runs the tests, `npm run check` type-checks.
 
