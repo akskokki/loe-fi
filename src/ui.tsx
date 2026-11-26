@@ -2,6 +2,7 @@
 //
 //   npm run ui                                start a session on port 7051
 //   npm run ui -- --join 192.168.1.10:7051    join a member at that address
+//   add --name alice to show a name to the others (default: your OS user name)
 //
 // The log goes to logs/<node id>.log; the last lines are also shown at the bottom.
 // Mouse handling works as in the tui-sequencer prototype: the app turns on the terminal's mouse
@@ -11,16 +12,23 @@ import fs from 'node:fs';
 import { parseArgs } from 'node:util';
 import { useEffect, useReducer, useRef, useState, type ReactNode } from 'react';
 import { render, Box, Text, useApp, useInput } from 'ink';
-import { PeerNode, localAddresses, parseAddress } from './node.js';
+import { PeerNode, chooseName, localAddresses, parseAddress, type MemberView } from './node.js';
 import { addTrack, playheadAt, setSteps, setTrackStatus, toggleCell, updatePlayback, type Track } from './state.js';
 
 const { values: args } = parseArgs({
   options: {
     port: { type: 'string', default: '7051' },
     join: { type: 'string' },
+    name: { type: 'string' },
     verbose: { type: 'boolean', default: false },
   },
 });
+
+const chosen = chooseName(args.name);
+if ('error' in chosen) {
+  console.error(chosen.error);
+  process.exit(1);
+}
 
 // --- Log: to a file, and the last lines kept for the screen ---
 
@@ -43,6 +51,7 @@ function log(line: string) {
 }
 
 const node: PeerNode = new PeerNode({
+  name: chosen.name,
   port: Number(args.port),
   join: args.join ? parseAddress(args.join) : undefined,
   verbose: args.verbose,
@@ -145,6 +154,13 @@ function useMouseClicks(onClick: (x: number, y: number) => void) {
 }
 
 // --- App ---
+
+/** Members' names, with the node ID added to any name that more than one member uses. */
+function labels(members: MemberView[]): Map<number, string> {
+  const count = new Map<string, number>();
+  for (const m of members) count.set(m.name, (count.get(m.name) ?? 0) + 1);
+  return new Map(members.map((m) => [m.id, count.get(m.name)! > 1 ? `${m.name} #${m.id}` : m.name]));
+}
 
 /** Visible tracks as [hash, track], in the same order on every node. */
 function visibleTracks(): [string, Track][] {
@@ -272,11 +288,12 @@ function App() {
   const reachable = node.myAddress ?? localAddresses().find((a) => !a.startsWith('127.')) ?? '127.0.0.1';
   const members = node.members().filter((m) => m.status !== 'not heard from');
   const hidden = node.members().length - members.length;
+  const label = labels(members);
 
   return (
     <Box flexDirection="column" padding={PAD}>
       <Text bold wrap="truncate-end">
-        Lö-Fi · node {node.id} · others join with --join {reachable}:{args.port}
+        Lö-Fi · {node.opts.name} · others join with --join {reachable}:{args.port}
       </Text>
       <Box marginTop={1}>
         {segments.map((seg, i) => (
@@ -340,8 +357,7 @@ function App() {
         <Text bold>Members</Text>
         {members.map((m) => (
           <Text key={m.id} wrap="truncate-end">
-            <Text color={m.status === 'gone' ? 'red' : 'green'}>{m.status === 'gone' ? '○' : '●'}</Text> {m.id}{' '}
-            {m.address ?? '?'}:{m.port}{' '}
+            <Text color={m.status === 'gone' ? 'red' : 'green'}>{m.status === 'gone' ? '○' : '●'}</Text> {label.get(m.id)}{' '}
             <Text dimColor>{m.status === 'me' ? '(me)' : m.status === 'gone' ? '(gone)' : ''}</Text>
           </Text>
         ))}

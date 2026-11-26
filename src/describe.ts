@@ -1,7 +1,5 @@
 // Text output for the headless peer: log lines for what a merge changed, and a text view of the grid.
-import { playheadAt, type Stamp, type State } from './state.js';
-
-const by = (s: Stamp) => `(by ${s.node})`;
+import { memberName, playheadAt, type Stamp, type State } from './state.js';
 
 /**
  * What changed between two versions of the state, one line per change. Relies on merge() and the
@@ -9,6 +7,7 @@ const by = (s: Stamp) => `(by ${s.node})`;
  */
 export function describeChanges(before: State, after: State): string[] {
   const out: string[] = [];
+  const by = (s: Stamp) => `(by ${memberName(after, s.node)})`;
   const steps = after.settings.steps;
   if (steps !== before.settings.steps) out.push(`step count set to ${steps.value} ${by(steps.stamp)}`);
   const pb = after.playback;

@@ -3,10 +3,11 @@
 //   npm run peer                              start a session on port 7051
 //   npm run peer -- --join 192.168.1.10:7051  join a member at that address
 //   npm run peer -- --port 7052 --join 127.0.0.1:7051   second peer on the same machine
+//   add --name alice to show a name to the others (default: your OS user name)
 //   add --verbose to log every STATE message sent and received
 import readline from 'node:readline';
 import { parseArgs } from 'node:util';
-import { PeerNode, localAddresses, parseAddress } from './node.js';
+import { PeerNode, chooseName, localAddresses, parseAddress } from './node.js';
 import { MAX_STEPS, addTrack, setSteps, setTrackStatus, toggleCell, updatePlayback, type NodeId, type State } from './state.js';
 import { renderGrid } from './describe.js';
 
@@ -14,11 +15,19 @@ const { values: args } = parseArgs({
   options: {
     port: { type: 'string', default: '7051' },
     join: { type: 'string' },
+    name: { type: 'string' },
     verbose: { type: 'boolean', default: false },
   },
 });
 
+const chosen = chooseName(args.name);
+if ('error' in chosen) {
+  console.error(chosen.error);
+  process.exit(1);
+}
+
 const node: PeerNode = new PeerNode({
+  name: chosen.name,
   port: Number(args.port),
   join: args.join ? parseAddress(args.join) : undefined,
   verbose: args.verbose,
@@ -50,7 +59,7 @@ function show() {
   for (const l of renderGrid(node.state, node.now())) console.log(`  ${l}`);
   for (const m of node.members()) {
     const seen = m.seenMsAgo === undefined ? '' : `, seen ${m.seenMsAgo} ms ago`;
-    console.log(`  member ${m.id} ${m.address ?? '?'}:${m.port} heartbeat ${m.heartbeat} (${m.status}${seen})`);
+    console.log(`  member ${m.name} (${m.id}) ${m.address ?? '?'}:${m.port} heartbeat ${m.heartbeat} (${m.status}${seen})`);
   }
 }
 
@@ -84,7 +93,7 @@ try {
   console.error(`could not listen on UDP port ${args.port}: ${(err as Error).message}`);
   process.exit(1);
 }
-console.log(`listening on UDP port ${args.port}. Others can join with one of:`);
+console.log(`${node.opts.name} listening on UDP port ${args.port}. Others can join with one of:`);
 for (const a of localAddresses()) console.log(`    --join ${a}:${args.port}`);
 console.log('type "help" for commands');
 readline.createInterface({ input: process.stdin }).on('line', run).on('close', () => process.exit(0));

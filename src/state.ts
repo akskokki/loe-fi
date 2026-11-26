@@ -51,6 +51,8 @@ export type Track = {
 };
 
 export type MemberInfo = {
+  /** Display name chosen by the member (see isValidName). Not unique: two members may pick the same one. */
+  name: string;
   /** Address other nodes can reach this member at; null until the member has learned it (see messages.ts). */
   address: string | null;
   port: number;
@@ -113,8 +115,19 @@ const isTrack = (t: any) =>
   isObj(t) && isReg(t.name, (v) => typeof v === 'string') && isReg(t.status, (v) => STATUSES.includes(v))
   && Array.isArray(t.cells) && t.cells.length === MAX_STEPS && t.cells.every((c: any) => isReg(c, (v) => typeof v === 'boolean'));
 
+export const MAX_NAME_LENGTH = 16;
+
+/**
+ * 1..MAX_NAME_LENGTH printable characters with no leading or trailing spaces. Names come from the
+ * network and are printed to the terminal, so control characters (escape sequences) are refused.
+ */
+export function isValidName(x: unknown): x is string {
+  return typeof x === 'string' && x.length >= 1 && x.length <= MAX_NAME_LENGTH && x === x.trim()
+    && !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(x);
+}
+
 const isMember = (m: any) =>
-  isReg(m, (v) => isObj(v) && (v.address === null || typeof v.address === 'string') && Number.isInteger(v.port)
+  isReg(m, (v) => isObj(v) && isValidName(v.name) && (v.address === null || typeof v.address === 'string') && Number.isInteger(v.port)
     && Array.isArray(v.samples) && v.samples.every((h: unknown) => typeof h === 'string'));
 
 const isPlayback = (p: any) =>
@@ -204,6 +217,11 @@ export function heartbeat(s: State, me: NodeId, info: MemberInfo): State {
 }
 
 // --- Derived values ---
+
+/** A member's display name, or its node ID if it has no entry (yet). */
+export function memberName(s: State, id: NodeId): string {
+  return Object.hasOwn(s.members, id) ? s.members[id].value.name : String(id);
+}
 
 export const stepDurationMs = (bpm: number) => 60_000 / bpm / 4; // one step is a 16th note
 

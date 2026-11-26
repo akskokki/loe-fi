@@ -9,7 +9,7 @@ import dgram from 'node:dgram';
 import { EventEmitter } from 'node:events';
 import os from 'node:os';
 import type { Address, Msg } from './messages.js';
-import { emptyState, heartbeat, isState, merge, type NodeId, type State } from './state.js';
+import { MAX_NAME_LENGTH, emptyState, heartbeat, isState, isValidName, memberName, merge, type NodeId, type State } from './state.js';
 import { describeChanges } from './describe.js';
 
 const SEND_INTERVAL_MS = 1000;
@@ -17,9 +17,11 @@ const PEER_TIMEOUT_MS = 5000;
 const RETRY_GONE_EVERY = 5; // also send to gone members on every 5th tick, so a healed network split reconnects
 
 export type MemberStatus = 'me' | 'alive' | 'gone' | 'not heard from';
-export type MemberView = { id: NodeId; address: string | null; port: number; heartbeat: number; status: MemberStatus; seenMsAgo?: number };
+export type MemberView = { id: NodeId; name: string; address: string | null; port: number; heartbeat: number; status: MemberStatus; seenMsAgo?: number };
 
 export type NodeOptions = {
+  /** Display name shown to the other members. Must pass isValidName(). */
+  name: string;
   port: number;
   join?: Address;
   verbose?: boolean;
@@ -30,6 +32,22 @@ export type NodeOptions = {
 export function parseAddress(s: string): Address {
   const [address, port] = s.split(':');
   return { address, port: Number(port ?? 7051) };
+}
+
+/**
+ * The --name argument, or the OS user name when it is missing. Returns an error message instead if
+ * the given name is not allowed.
+ */
+export function chooseName(arg: string | undefined): { name: string } | { error: string } {
+  if (arg !== undefined) {
+    const name = arg.trim();
+    return isValidName(name) ? { name } : { error: `--name must be 1 to ${MAX_NAME_LENGTH} printable characters` };
+  }
+  let user = '';
+  try {
+    user = os.userInfo().username.trim().slice(0, MAX_NAME_LENGTH).trim();
+  } catch {} // no user name on some systems; fall back below
+  return { name: isValidName(user) ? user : 'peer' };
 }
 
 /** This machine's IPv4 addresses, for telling others what to join. */
@@ -127,7 +145,7 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
       const l = this.liveness.get(id);
       const status: MemberStatus = id === this.id ? 'me' : l?.alive ? 'alive' : l?.everAlive ? 'gone' : 'not heard from';
       return {
-        id, address: entry.value.address, port: entry.value.port, heartbeat: entry.stamp.ver, status,
+        id, name: entry.value.name, address: entry.value.address, port: entry.value.port, heartbeat: entry.stamp.ver, status,
         seenMsAgo: l && status === 'alive' ? now - l.changedAt : undefined,
       };
     });
@@ -142,7 +160,7 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
   }
 
   private memberInfo() {
-    return { address: this.myAddress, port: this.opts.port, samples: [] };
+    return { name: this.opts.name, address: this.myAddress, port: this.opts.port, samples: [] };
   }
 
   // --- Sending ---
@@ -243,21 +261,21 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
       if (id === this.id) continue;
       const ver = entry.stamp.ver;
       const known = this.liveness.get(id);
-      const where = `${entry.value.address ?? '?'}:${entry.value.port}`;
+      const where = `${memberName(this.state, id)} (${id}, ${entry.value.address ?? '?'}:${entry.value.port})`;
       if (!known) {
         // Seeing an entry proves nothing: member entries are never removed, so this may be a peer
         // that quit long ago, e.g. our own previous run on this machine. Wait for its heartbeat to move.
         this.liveness.set(id, { ver, changedAt: now, alive: false, everAlive: false });
       } else if (ver > known.ver) {
         if (!known.alive) {
-          this.log(`+ member ${id} (${where})${known.everAlive ? ' is back' : ''}`);
+          this.log(`+ member ${where}${known.everAlive ? ' is back' : ''}`);
           changed = true;
         }
         this.liveness.set(id, { ver, changedAt: now, alive: true, everAlive: true });
       } else if (known.alive && now - known.changedAt > PEER_TIMEOUT_MS) {
         known.alive = false;
         changed = true;
-        this.log(`- member ${id} (${where}) timed out`);
+        this.log(`- member ${where} timed out`);
       }
     }
     if (changed) this.emit('change');
