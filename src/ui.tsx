@@ -61,8 +61,16 @@ const node: PeerNode = new PeerNode({
 // --- Fixed layout, shared by rendering and mouse hit-testing (0-based content coordinates) ---
 
 const PAD = 1; // <Box padding={1}>
-const CONTROLS_ROW = 2; // title, blank, controls
-const TRACKS_ROW = 5; // blank, step numbers, then one row per track
+const BANNER = [
+  '             ▄▄  ▄▄',
+  ' ██        ▄██████▄          ████████  ▄▄',
+  ' ██        ██    ██  ▄▄▄▄▄▄  ██▄▄▄▄',
+  ' ██        ██    ██          ██        ██',
+  ' ██▄▄▄▄▄▄  ▀██████▀          ██        ██  ♪ ♫',
+];
+const BANNER_COLORS = ['magenta', 'magenta', 'magentaBright', 'cyan', 'cyanBright'];
+const CONTROLS_ROW = BANNER.length + 2; // banner, title, blank, controls
+const TRACKS_ROW = CONTROLS_ROW + 3; // blank, step numbers, then one row per track
 const LABEL_WIDTH = 11; // track name (9) + mute marker + space
 const CELL_WIDTH = 3; // "[■]"
 const GROUP_WIDTH = 4 * CELL_WIDTH + 1; // four cells and a space
@@ -307,6 +315,11 @@ function App() {
 
   return (
     <Box flexDirection="column" padding={PAD}>
+      {BANNER.map((line, i) => (
+        <Text key={i} color={BANNER_COLORS[i]} wrap="truncate-end">
+          {line}
+        </Text>
+      ))}
       <Text bold wrap="truncate-end">
         Lö-Fi · {node.opts.name} · others join with --join {reachable}:{args.port}
       </Text>
