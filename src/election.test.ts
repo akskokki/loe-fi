@@ -93,3 +93,19 @@ test('a new node waits for an existing reference before holding an election', (t
   e.tick();
   assert.deepEqual(sent, [[2, 'ELECTION']]);
 });
+
+test('a COORDINATOR from a node lower than the live reference is ignored', (t) => {
+  const { e } = setup(t, 1, [2, 3]);
+  e.receive('COORDINATOR', 3);
+  e.receive('COORDINATOR', 2); // e.g. 2 elected itself before it knew about 3
+  assert.equal(e.reference, 3);
+});
+
+test('the reference answers a lower COORDINATOR by announcing itself again', (t) => {
+  const { e, sent } = setup(t, 3, [1, 2]);
+  e.start('test');
+  sent.length = 0;
+  e.receive('COORDINATOR', 2);
+  assert.equal(e.reference, 3);
+  assert.deepEqual(sent, [[1, 'COORDINATOR'], [2, 'COORDINATOR']]);
+});
