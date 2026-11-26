@@ -9,41 +9,22 @@
 //   add --audio to play the grid (the UI plays it by default)
 import readline from 'node:readline';
 import { parseArgs } from 'node:util';
-import { PeerNode, chooseName, localAddresses, parseAddress } from '../net/node.js';
+import type { PeerNode } from '../net/node.js';
+import { COMMON_OPTIONS, localAddresses, nodeFromArgs, startAudio, startOrExit } from './cli.js';
 import { MAX_STEPS, addTrack, fingerprint, setSteps, setTrackStatus, toggleCell, updatePlayback, type NodeId, type State } from '../state/state.js';
 import { renderGrid } from '../state/describe.js';
 import { PRESETS, isPreset } from '../audio/presets.js';
 import { findTrack, presetKey } from '../samples/keys.js';
 import { addSampleFile } from '../samples/addfile.js';
-import { AudioEngine } from '../audio/engine.js';
 
 const { values: args } = parseArgs({
   options: {
-    port: { type: 'string', default: '7051' },
-    join: { type: 'string' },
-    name: { type: 'string' },
-    verbose: { type: 'boolean', default: false },
-    drop: { type: 'string', default: '0' }, // share of received packets to throw away, e.g. 0.3
+    ...COMMON_OPTIONS,
     audio: { type: 'boolean', default: false }, // play the grid; off by default so peers on VMs need no sound setup
-    samples: { type: 'string', default: 'samples' }, // folder for sample files; give each peer on one machine its own
   },
 });
 
-const chosen = chooseName(args.name);
-if ('error' in chosen) {
-  console.error(chosen.error);
-  process.exit(1);
-}
-
-const node: PeerNode = new PeerNode({
-  name: chosen.name,
-  port: Number(args.port),
-  join: args.join ? parseAddress(args.join) : undefined,
-  verbose: args.verbose,
-  drop: Number(args.drop),
-  sampleDir: args.samples,
-  log: (s) => console.log(`${new Date().toISOString().slice(11, 23)} [${node.id}] ${s}`),
-});
+const node: PeerNode = nodeFromArgs(args, (s) => console.log(`${new Date().toISOString().slice(11, 23)} [${node.id}] ${s}`));
 
 const HELP = `commands:
   add <sound>          add a track with a preset: ${PRESETS.join(', ')}
@@ -135,22 +116,9 @@ function run(line: string) {
   if (!change || node.edit(change).length === 0) console.log('nothing changed (unknown track or step?)');
 }
 
-try {
-  await node.start();
-} catch (err) {
-  console.error(`could not listen on UDP port ${args.port}: ${(err as Error).message}`);
-  process.exit(1);
-}
+await startOrExit(node);
 console.log(`${node.opts.name} listening on UDP port ${args.port}. Others can join with one of:`);
 for (const a of localAddresses()) console.log(`    --join ${a}:${args.port}`);
 console.log('type "help" for commands');
-if (args.audio) {
-  try {
-    const audio = await AudioEngine.open();
-    audio.start(() => node.state, () => node.now(), (h) => (node.store.has(h) ? node.store.read(h) : null), (l) => console.log(l));
-    console.log(`audio on, output latency ${audio.latencyMs.toFixed(0)} ms`);
-  } catch (err) {
-    console.log(`audio off: ${(err as Error).message}`);
-  }
-}
+if (args.audio) await startAudio(node, (l) => console.log(l));
 readline.createInterface({ input: process.stdin }).on('line', run).on('close', () => process.exit(0));

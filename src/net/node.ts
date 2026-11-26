@@ -9,12 +9,10 @@
 import dgram from 'node:dgram';
 import dns from 'node:dns/promises';
 import { EventEmitter } from 'node:events';
-import os from 'node:os';
 import type net from 'node:net';
 import { wellFormed, type Address, type Msg } from './messages.js';
 import { Membership, type MemberView } from './membership.js';
 import { addTrack, emptyState, heartbeat, memberName, merge, type NodeId, type State } from '../state/state.js';
-import { MAX_NAME_LENGTH, isValidName } from '../state/validate.js';
 import { describeChanges } from '../state/describe.js';
 import { Clock } from '../sync/clock.js';
 import { Election } from '../sync/election.js';
@@ -44,34 +42,6 @@ export type NodeOptions = {
   sampleDir?: string;
   log: (line: string) => void;
 };
-
-/** Parses "host:port" (port defaults to 7051). */
-export function parseAddress(s: string): Address {
-  const [address, port] = s.split(':');
-  return { address, port: Number(port ?? 7051) };
-}
-
-/**
- * The --name argument, or the OS user name when it is missing. Returns an error message instead if
- * the given name is not allowed.
- */
-export function chooseName(arg: string | undefined): { name: string } | { error: string } {
-  if (arg !== undefined) {
-    const name = arg.trim();
-    return isValidName(name) ? { name } : { error: `--name must be 1 to ${MAX_NAME_LENGTH} printable characters` };
-  }
-  let user = '';
-  try {
-    user = os.userInfo().username.trim().slice(0, MAX_NAME_LENGTH).trim();
-  } catch {} // no user name on some systems; fall back below
-  return { name: isValidName(user) ? user : 'peer' };
-}
-
-/** This machine's IPv4 addresses, for telling others what to join. */
-export function localAddresses(): string[] {
-  return Object.values(os.networkInterfaces()).flatMap((addrs) =>
-    (addrs ?? []).filter((a) => a.family === 'IPv4').map((a) => a.address));
-}
 
 const isLoopback = (a: string) => a.startsWith('127.') || a === 'localhost';
 
