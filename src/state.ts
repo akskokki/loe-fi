@@ -110,6 +110,9 @@ function write<T>(reg: Reg<T>, value: T, me: NodeId): Reg<T> {
 
 const unset = <T>(value: T): Reg<T> => ({ value, stamp: NO_STAMP });
 
+/** Own-property lookup, so a name like "constructor" is not found on Object.prototype. */
+const getTrack = (s: State, hash: string): Track | undefined => (Object.hasOwn(s.tracks, hash) ? s.tracks[hash] : undefined);
+
 export function emptyState(): State {
   return {
     settings: { steps: unset(16) },
@@ -121,7 +124,7 @@ export function emptyState(): State {
 
 /** Add a track for a sample. Adding a sample whose track was deleted brings that track back with its old cells. */
 export function addTrack(s: State, me: NodeId, hash: string, name: string): State {
-  if (s.tracks[hash]) return setTrackStatus(s, me, hash, 'active');
+  if (getTrack(s, hash)) return setTrackStatus(s, me, hash, 'active');
   const track: Track = {
     name: write(unset(name), name, me),
     status: write(unset<TrackStatus>('active'), 'active', me),
@@ -131,14 +134,14 @@ export function addTrack(s: State, me: NodeId, hash: string, name: string): Stat
 }
 
 export function setTrackStatus(s: State, me: NodeId, hash: string, status: TrackStatus): State {
-  const t = s.tracks[hash];
+  const t = getTrack(s, hash);
   if (!t || t.status.value === status) return s;
   return { ...s, tracks: { ...s.tracks, [hash]: { ...t, status: write(t.status, status, me) } } };
 }
 
 export function toggleCell(s: State, me: NodeId, hash: string, step: number): State {
-  const t = s.tracks[hash];
-  if (!t || step < 0 || step >= MAX_STEPS) return s;
+  const t = getTrack(s, hash);
+  if (!t || !Number.isInteger(step) || step < 0 || step >= MAX_STEPS) return s;
   const cells = t.cells.slice();
   cells[step] = write(cells[step], !cells[step].value, me);
   return { ...s, tracks: { ...s.tracks, [hash]: { ...t, cells } } };
