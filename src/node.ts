@@ -12,9 +12,13 @@ import os from 'node:os';
 import type { Address, Msg } from './messages.js';
 import { MAX_NAME_LENGTH, emptyState, heartbeat, isState, isValidName, memberName, merge, type NodeId, type State } from './state.js';
 import { describeChanges } from './describe.js';
+import { Clock } from './clock.js';
+import { Election } from './election.js';
 
 const SEND_INTERVAL_MS = 1000;
 const PEER_TIMEOUT_MS = 5000;
+const SYNC_EVERY_MS = 1000; // clock sync requests to the reference; faster until the first few samples
+const SYNC_FAST_MS = 250;
 const RETRY_GONE_EVERY = 5; // also send to gone members on every 5th tick, so a healed network split reconnects
 
 export type MemberStatus = 'me' | 'alive' | 'gone' | 'not heard from';
@@ -28,6 +32,8 @@ export type NodeOptions = {
   verbose?: boolean;
   /** Share of received packets to throw away (0..1), to simulate a lossy network. */
   drop?: number;
+  /** Shift this node's local clock by this many ms, to test clock sync with nodes on one machine. */
+  clockSkewMs?: number;
   log: (line: string) => void;
 };
 
@@ -64,9 +70,30 @@ const isLoopback = (a: string) => a.startsWith('127.') || a === 'localhost';
 /** Shape check, so a packet from an older version of this program is reported instead of crashing us or spreading. */
 function wellFormed(m: any): m is Msg {
   if (typeof m !== 'object' || m === null || typeof m.from !== 'number') return false;
-  if (typeof m.to?.address !== 'string' || !Number.isInteger(m.to.port)) return false;
-  return m.type === 'JOIN' || (m.type === 'STATE' && isState(m.state));
+  const num = (x: unknown) => typeof x === 'number' && Number.isFinite(x);
+  const hasTo = typeof m.to?.address === 'string' && Number.isInteger(m.to.port);
+  switch (m.type) {
+    case 'JOIN': return hasTo;
+    case 'STATE': return hasTo && isState(m.state);
+    case 'ELECTION': case 'ANSWER': case 'COORDINATOR': return true;
+    case 'TIME_REQUEST': return num(m.t0);
+    case 'TIME_REPLY': return num(m.t0) && num(m.t1) && num(m.t2);
+    default: return false;
+  }
 }
+
+export type SyncView = {
+  /** Node ID of the time reference, or null while there is none. */
+  reference: NodeId | null;
+  referenceName: string | null;
+  iAmReference: boolean;
+  /** True when this node is the reference or has enough samples from it. */
+  synced: boolean;
+  /** Session time minus this machine's clock, in ms. */
+  offsetMs: number;
+  /** Round-trip delay of the sample the offset comes from. */
+  delayMs: number | null;
+};
 
 /** Emits 'change' whenever the state or a member's liveness changes. */
 export class PeerNode extends EventEmitter<{ change: [] }> {
@@ -88,15 +115,49 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
   private joined = false;
   /** Packet counts since start. `dropped` counts packets thrown away by the `drop` option. */
   readonly stats = { sent: 0, received: 0, dropped: 0 };
+  readonly clock: Clock;
+  private election: Election;
+  private syncTimer: ReturnType<typeof setInterval> | undefined;
+  private lastSyncRequest = 0;
+  private stopped = false;
 
   constructor(readonly opts: NodeOptions) {
     super();
     this.sock.on('message', (buf, rinfo) => this.receive(buf, rinfo));
+    this.clock = new Clock(opts.clockSkewMs ?? 0);
+    this.election = new Election({
+      me: this.id,
+      liveMembers: () => this.liveMembers(),
+      send: (to, type) => this.sendTo(to, { type, from: this.id }),
+      // May take over unless a live reference exists that we have not synced to yet.
+      canLead: () => {
+        const ref = this.election.reference;
+        return ref === null || ref === this.id || this.clock.synced || !this.liveMembers().includes(ref);
+      },
+      log: (line) => this.log(line),
+      nameOf: (id) => `${memberName(this.state, id)} (${id})`,
+      onChange: () => {
+        this.clock.resetSamples(); // samples from the old reference no longer apply
+        this.emit('change');
+      },
+    });
   }
 
-  /** Session time in ms. Stands in for the synchronized session clock until clock sync exists. */
+  /** Session time in ms: this machine's clock corrected to the time reference's (see clock.ts). */
   now(): number {
-    return Date.now();
+    return this.clock.now();
+  }
+
+  sync(): SyncView {
+    const reference = this.election.reference;
+    return {
+      reference,
+      referenceName: reference === null ? null : memberName(this.state, reference),
+      iAmReference: reference === this.id,
+      synced: reference === this.id || this.clock.synced,
+      offsetMs: this.clock.offset,
+      delayMs: this.clock.delay,
+    };
   }
 
   /** Bind the socket and start the heartbeat. Rejects if the port is taken or the join host is unknown. */
@@ -118,14 +179,20 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
           this.updateLiveness(Date.now());
           this.sendJoin();
           this.broadcast(++tick % RETRY_GONE_EVERY === 0);
+          this.election.tick();
         }, SEND_INTERVAL_MS);
+        this.syncTimer = setInterval(() => this.requestTime(), SYNC_FAST_MS);
         resolve();
       });
     });
   }
 
   stop() {
+    if (this.stopped) return;
+    this.stopped = true;
     clearInterval(this.timer);
+    clearInterval(this.syncTimer);
+    this.election.stop();
     this.sock.close();
   }
 
@@ -188,6 +255,31 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
     });
   }
 
+  /** Send to a member by node ID, at the address its packets come from or else the one in its entry. */
+  private sendTo(id: NodeId, msg: Msg) {
+    const addr = this.addressOf(id);
+    if (addr) this.send(msg, addr);
+  }
+
+  private addressOf(id: NodeId): Address | null {
+    const entry = Object.hasOwn(this.state.members, id) ? this.state.members[id] : undefined;
+    return this.observed.get(id) ?? (entry?.value.address ? { address: entry.value.address, port: entry.value.port } : null);
+  }
+
+  private liveMembers(): NodeId[] {
+    return [...this.liveness].filter(([, l]) => l.alive).map(([id]) => id);
+  }
+
+  /** Ask the reference for the time: every SYNC_EVERY_MS, or every SYNC_FAST_MS until synced. */
+  private requestTime() {
+    const ref = this.election.reference;
+    if (ref === null || ref === this.id) return;
+    const now = Date.now();
+    if (this.clock.synced && now - this.lastSyncRequest < SYNC_EVERY_MS) return;
+    this.lastSyncRequest = now;
+    this.sendTo(ref, { type: 'TIME_REQUEST', from: this.id, t0: this.clock.local() });
+  }
+
   private sendState(to: Address) {
     this.send({ type: 'STATE', from: this.id, to, state: this.state }, to);
   }
@@ -204,14 +296,14 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
   /** Addresses of the live and just-learned members (and the gone ones too if asked), plus the join target until we know any member. */
   private targets(includeGone: boolean): Address[] {
     const out = new Map<string, Address>();
-    for (const [key, entry] of Object.entries(this.state.members)) {
+    for (const key of Object.keys(this.state.members)) {
       const id = Number(key);
       const l = this.liveness.get(id);
       // A member we only just learned about from someone else gets our STATE for a few seconds, so
       // it can answer directly instead of us waiting for its heartbeat to move in gossip.
       const justLearned = l !== undefined && !l.everAlive && Date.now() - l.changedAt < PEER_TIMEOUT_MS;
       if (id === this.id || !(includeGone || l?.alive || justLearned)) continue;
-      const addr = this.observed.get(id) ?? (entry.value.address ? { address: entry.value.address, port: entry.value.port } : null);
+      const addr = this.addressOf(id);
       if (addr) out.set(`${addr.address}:${addr.port}`, addr);
     }
     if (out.size === 0 && this.joinTarget) out.set('join', this.joinTarget);
@@ -270,6 +362,22 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
       for (const line of changes) this.log(`<- ${line}`);
       if (changes.length > 0) this.emit('change');
       this.updateLiveness(Date.now(), msg.from);
+    } else if (msg.type === 'ELECTION' || msg.type === 'ANSWER' || msg.type === 'COORDINATOR') {
+      const repeat = msg.type === 'COORDINATOR' && msg.from === this.election.reference; // re-sent every few seconds
+      if (!repeat || this.opts.verbose) this.log(`<- ${msg.type} from ${memberName(this.state, msg.from)} (${msg.from})`);
+      this.election.receive(msg.type, msg.from);
+    } else if (msg.type === 'TIME_REQUEST') {
+      const t1 = this.now();
+      this.send({ type: 'TIME_REPLY', from: this.id, t0: msg.t0, t1, t2: this.now() }, from);
+    } else if (msg.type === 'TIME_REPLY') {
+      if (msg.from !== this.election.reference) return; // a late reply from a previous reference
+      const wasSynced = this.clock.synced;
+      const sample = this.clock.addSample(msg.t0, msg.t1, msg.t2, this.clock.local());
+      if (this.opts.verbose) this.log(`<- TIME_REPLY offset ${sample.offset.toFixed(2)} ms, delay ${sample.delay.toFixed(2)} ms`);
+      if (!wasSynced && this.clock.synced) {
+        this.log(`clock synced to ${memberName(this.state, msg.from)}: offset ${this.clock.offset.toFixed(1)} ms, delay ${this.clock.delay?.toFixed(1)} ms`);
+        this.emit('change');
+      }
     }
   }
 

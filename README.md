@@ -13,6 +13,8 @@ Real-time multiplayer drum sequencer. Design: [docs/design-plan.tex](docs/design
 | `src/peer.ts` | Headless peer that takes typed commands (`npm run peer`), for VMs and scripted tests |
 | `src/describe.ts` | Log lines for what changed, and the grid as text |
 | `src/state.test.ts` | Tests for the merge rule (`npm test`) |
+| `src/election.ts` | Bully election of the time reference |
+| `src/clock.ts` | Session time, synced to the time reference NTP-style |
 | `src/harness.ts` | Convergence test over the network code (`npm run harness`) |
 
 `npm test` runs the tests, `npm run check` type-checks.
@@ -24,7 +26,7 @@ npm run harness                                              # 5 peers, 10 s of 
 npm run harness -- --peers 8 --seconds 20 --drop 0.5 --outage 6
 ```
 
-Starts several peers on this machine, each joining a random earlier peer, and lets every peer make random edits (mostly toggling the same few cells, so edits conflict) while each throws away the given share of the packets it receives. With `--outage`, one peer goes offline for that many seconds in the middle. When the edits stop, the harness waits until every peer has the same state fingerprint and sees all the others alive, prints a table and exits with 0. If that doesn't happen within 30 s, it prints FAILED and exits with 1. Every peer's log goes to `logs/harness-<time>.log`. `--seed` repeats the same edits; packet loss stays random.
+Starts several peers on this machine, each joining a random earlier peer and with its clock shifted by up to `--skew` ms (500 by default), and lets every peer make random edits (mostly toggling the same few cells, so edits conflict) while each throws away the given share of the packets it receives. With `--outage`, one peer goes offline for that many seconds in the middle. When the edits stop, the harness waits until every peer has the same state fingerprint, sees all the others alive, follows the highest node as time reference and has a session clock within 10 ms of the others; then it prints a table and exits with 0. With `--kill-reference` it then stops the time reference and checks that the others elect a new one and that session time doesn't jump. If that doesn't happen within 30 s, it prints FAILED and exits with 1. Every peer's log goes to `logs/harness-<time>.log`. `--seed` repeats the same edits; packet loss stays random.
 
 The headless peer and the UI also take `--drop 0.3`, and `show` prints the state fingerprint, so you can compare peers on different machines.
 
@@ -52,7 +54,7 @@ The UI and the headless peer can be in the same session. Setup on each machine i
 | Delete | `d` | Delete the selected track (adding the same name brings it back) |
 | Quit | `q` or Esc | Quit |
 
-There is no audio yet; the playhead only moves on screen.
+There is no audio yet; the playhead only moves on screen. It follows session time: the peers elect the one with the highest node ID as time reference (bully algorithm) and the others sync their clocks to it, so the playhead is on the same step everywhere. The Members panel shows the reference and this peer's clock offset; `show` in the headless peer prints the same.
 
 ## Headless peer
 

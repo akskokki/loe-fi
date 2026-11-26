@@ -77,9 +77,34 @@ Status: **proposed** means it's in the code but the group hasn't confirmed it ye
 - **Code:** STATE goes to live members every second, and also to gone members every 5th second.
 - **Why:** without this, two sides of a network split that have written each other off never contact each other again, and the session stays split after the network heals.
 
-## Playhead
+## Playhead synchronization
 
-### Session time is the system clock for now · temporary
+The plan's approach is built: the live node with the highest ID is elected time reference with the bully algorithm (`src/election.ts`), the others sync to it with NTP-style round trips (`src/clock.ts`), and `PeerNode.now()` returns session time. The departures:
 
-- **Plan:** playhead times are in session time, a shared clock synced to the time reference NTP-style.
-- **Code:** `PeerNode.now()` returns `Date.now()`. Playheads line up only as well as the computers' clocks already agree. This goes away when clock sync is built; `now()` is the only place that needs to change.
+### Session time is a local monotonic clock plus an offset · proposed
+
+- **Plan:** nodes "regularly ask it for the time and correct the answer for the network delay".
+- **Code:** each node keeps `session time = local clock + offset`. The local clock is `performance.timeOrigin + performance.now()`, which is not affected by system clock adjustments. A request carries t0, the reply t1 and t2 (the reference's session time on arrival and departure), and the requester notes t3: `offset = ((t1 - t0) + (t2 - t3)) / 2`, `delay = (t3 - t0) - (t2 - t1)`. A node asks 4 times a second until it has 3 samples and once a second after that, and uses the offset of the sample with the smallest delay out of the last 8, since that one was least distorted by queueing.
+- **Why:** the smallest-delay filter is what NTP does to cut the error from asymmetric delays.
+
+### The reference keeps its offset, so session time doesn't jump at a handover · proposed
+
+- **Plan:** doesn't say what session time is when the reference changes.
+- **Code:** the reference doesn't sync to anyone and leaves its offset as it was. A node that becomes the reference keeps the offset it had from syncing to the previous one, so session time continues smoothly. In the harness, killing the reference moved session time by under 0.1 ms on every node.
+- **Cost:** when two nodes become references without having synced to each other (at startup, or both sides of a network split), the followers of the one that loses jump by the difference between the two clocks once.
+
+### A node only takes over as reference once its clock is synced · proposed
+
+- **Plan:** bully algorithm: the live node with the highest ID wins.
+- **Code:** a node with a higher ID than the current reference waits until it has synced to that reference before it holds the election that makes it the new one. Until then it follows the lower reference.
+- **Why:** otherwise a node that has just joined, with a higher random ID, would become the reference with an unsynced clock, and every other node's playhead would jump by the difference between the clocks.
+
+### Election messages are repeated · proposed
+
+- **Plan:** "Election messages … bully algorithm, not designed yet".
+- **Code:** ELECTION, ANSWER and COORDINATOR as in the textbook bully algorithm, over UDP. Because UDP can lose them: ELECTION is sent twice; the reference repeats COORDINATOR every 2 s, which also tells nodes that joined later; a node that got an ANSWER but no COORDINATOR within 4 s starts over. A new node waits 3 s to hear of an existing reference before it holds an election itself.
+- **Known effect:** nodes that start together may elect themselves before they know of the higher nodes. The extra references disappear within a few seconds once the higher nodes are known (see the cost under the previous entry).
+
+### Not done yet
+
+- Correcting for each machine's audio output latency (there is no audio yet).

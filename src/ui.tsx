@@ -311,6 +311,7 @@ function App() {
   });
 
   const reachable = node.myAddress ?? localAddresses().find((a) => !a.startsWith('127.')) ?? '127.0.0.1';
+  const sync = node.sync();
   const members = node.members().filter((m) => m.status !== 'not heard from');
   const hidden = node.members().length - members.length;
   const label = labels(members);
@@ -390,8 +391,17 @@ function App() {
           <Text key={m.id} wrap="truncate-end">
             <Text color={m.status === 'gone' ? 'red' : 'green'}>{m.status === 'gone' ? '○' : '●'}</Text> {label.get(m.id)}{' '}
             <Text dimColor>{m.status === 'me' ? '(me)' : m.status === 'gone' ? '(gone)' : ''}</Text>
+            {m.id === sync.reference && <Text color="yellow"> time reference</Text>}
           </Text>
         ))}
+        <Text dimColor wrap="truncate-end">
+          {sync.iAmReference
+            ? 'Clock: this node is the time reference'
+            : sync.reference === null
+              ? 'Clock: no time reference yet'
+              : `Clock: ${sync.synced ? 'synced' : 'syncing'} to ${sync.referenceName}, offset ${sync.offsetMs.toFixed(1)} ms`
+                + (sync.delayMs === null ? '' : `, round trip ${sync.delayMs.toFixed(1)} ms`)}
+        </Text>
         {hidden > 0 && <Text dimColor>{hidden} earlier member(s) not heard from</Text>}
       </Box>
 

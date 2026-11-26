@@ -67,6 +67,13 @@ function show() {
   // Same fingerprint on two peers = same sequencer state. Packet counts include the --drop losses.
   const { sent, received, dropped } = node.stats;
   console.log(`  state fingerprint ${fingerprint(node.state)} · packets sent ${sent}, received ${received}, dropped ${dropped}`);
+  const sync = node.sync();
+  if (sync.iAmReference) console.log('  clock: this node is the time reference');
+  else if (sync.reference === null) console.log('  clock: no time reference yet');
+  else {
+    const delay = sync.delayMs === null ? '' : `, round trip ${sync.delayMs.toFixed(1)} ms`;
+    console.log(`  clock: ${sync.synced ? 'synced' : 'syncing'} to ${sync.referenceName}, offset ${sync.offsetMs.toFixed(1)} ms${delay}`);
+  }
 }
 
 function run(line: string) {
