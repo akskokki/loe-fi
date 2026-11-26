@@ -1,15 +1,13 @@
 // The sample files this node holds, in a folder of files named by their SHA-256 hash. Files are
 // only ever stored under the hash of their own contents, so a name from the network can never
 // choose a path, and a file that doesn't match its hash is never kept.
-import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { isHash } from './keys.js';
+import { isHash, sha256 } from './hash.js';
 
 /** The design plan's "maximum of a few megabytes". */
 export const MAX_SAMPLE_BYTES = 5 * 1024 * 1024;
 
-export const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
 export class SampleStore {
   private hashes = new Set<string>();

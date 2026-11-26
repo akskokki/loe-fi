@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  addTrack, emptyState, fingerprint, heartbeat, isState, isValidName, memberName, merge, playheadAt, setSteps, setTrackStatus, stepDurationMs,
+  addTrack, emptyState, fingerprint, heartbeat, memberName, merge, playheadAt, setSteps, setTrackStatus, stepDurationMs,
   toggleCell, updatePlayback, type NodeId, type State, type TrackStatus,
 } from './state.js';
+import { isState, isValidName } from './validate.js';
 
 const A = 1, B = 2, C = 3;
 const member = (port: number) => ({ name: `peer${port}`, address: '10.0.0.1', port, samples: [] });

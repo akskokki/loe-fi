@@ -7,12 +7,11 @@
 // Two people adding the same file get the same key, and so the same track.
 import { isPreset, type Preset } from '../audio/presets.js';
 import type { State } from '../state/state.js';
+import { isHash } from './hash.js';
 
 export const presetKey = (p: Preset) => `preset:${p}`;
 export const sampleKey = (hash: string) => `sha256:${hash}`;
 
-/** A SHA-256 hash as 64 lowercase hex characters. Anything else from the network is refused. */
-export const isHash = (x: unknown): x is string => typeof x === 'string' && /^[0-9a-f]{64}$/.test(x);
 
 export type Sound = { kind: 'preset'; preset: Preset } | { kind: 'sample'; hash: string };
 
