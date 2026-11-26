@@ -99,6 +99,21 @@ function controlSegments(playing: boolean, bpm: number, steps: number): Segment[
   ];
 }
 
+/** One help line: each [key, description] pair, with the key highlighted. */
+function HelpLine({ items }: { items: [string, string][] }) {
+  return (
+    <Text wrap="truncate-end">
+      {items.map(([key, desc], i) => (
+        <Text key={key}>
+          {i > 0 && <Text dimColor> · </Text>}
+          <Text color="yellow" bold>{key}</Text>
+          <Text dimColor> {desc}</Text>
+        </Text>
+      ))}
+    </Text>
+  );
+}
+
 type Target =
   | { kind: 'action'; action: Action }
   | { kind: 'cell'; track: number; step: number }
@@ -336,7 +351,7 @@ function App() {
         <StepRow steps={steps} cell={(s) => <Text color="yellow">{playing && playhead === s ? ' ▲ ' : '   '}</Text>} />
       </Box>
 
-      <Box marginTop={1}>
+      <Box marginTop={1} flexDirection="column" height={2}>
         {deleting !== null ? (
           <Text>
             Delete track <Text color="red">{state.tracks[deleting]?.name.value}</Text>? <Text dimColor>(y/n)</Text>
@@ -347,9 +362,10 @@ function App() {
             <Text inverse> </Text> <Text dimColor>(Enter to add, Esc to cancel)</Text>
           </Text>
         ) : (
-          <Text dimColor wrap="truncate-end">
-            click cells and buttons · arrows move · space toggle · p play/stop · +/- tempo · [ ] steps · a add · m mute · d delete · q quit
-          </Text>
+          <>
+            <HelpLine items={[['click', 'cells and buttons'], ['arrows', 'move'], ['space', 'toggle'], ['m', 'mute'], ['d', 'delete']]} />
+            <HelpLine items={[['p', 'play/stop'], ['+/-', 'tempo'], ['[ ]', 'steps'], ['a', 'add track'], ['q', 'quit']]} />
+          </>
         )}
       </Box>
 
