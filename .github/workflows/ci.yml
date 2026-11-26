@@ -1,0 +1,27 @@
+# Runs on every push and pull request: lint and formatting, type check, unit tests, and a short
+# run of the convergence harness (several peers on one machine, with packet loss and sample files).
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Lint and formatting
+        run: npm run lint
+      - name: Type check
+        run: npm run check
+      - name: Unit tests
+        run: npm test
+      - name: Convergence harness
+        run: npm run harness -- --peers 5 --seconds 6 --samples 2 --kill-reference
