@@ -16,7 +16,7 @@ import readline from 'node:readline';
 import { parseArgs } from 'node:util';
 import type { Address, Msg } from './messages.js';
 import {
-  addTrack, emptyState, heartbeat, isState, merge, setSteps, setTrackStatus, toggleCell, updatePlayback,
+  MAX_STEPS, addTrack, emptyState, heartbeat, isState, merge, setSteps, setTrackStatus, toggleCell, updatePlayback,
   type NodeId, type State,
 } from './state.js';
 import { describeChanges, renderGrid } from './describe.js';
@@ -173,7 +173,7 @@ sock.on('error', (err) => {
 
 const HELP = `commands:
   add <name>           add a track (e.g. add kick)
-  t <track> <step>     toggle a step, counted from 1 (e.g. t kick 1)
+  t <track> <steps>    toggle steps, counted from 1 (e.g. t kick 1, t hihat 1 5 14, t snare 1-4)
   mute|unmute|del <track>
   play | stop | bpm <n> | steps <n>
   show                 print the grid and the members
@@ -190,6 +190,18 @@ function showMembers(now: number) {
   }
 }
 
+// Turns step arguments like ["1", "5-8"] into 0-based indexes, each at most once.
+function parseSteps(args: string[]): number[] {
+  const steps = new Set<number>();
+  for (const arg of args) {
+    const range = arg.match(/^(\d+)-(\d+)$/);
+    if (!range) { steps.add(Number(arg) - 1); continue; }
+    const lo = Number(range[1]), hi = Math.min(Number(range[2]), MAX_STEPS);
+    for (let s = lo; s <= hi; s++) steps.add(s - 1);
+  }
+  return [...steps];
+}
+
 function run(line: string) {
   const [cmd, ...rest] = line.trim().split(/\s+/);
   const now = Date.now(); // stands in for session time until clock sync exists
@@ -197,7 +209,7 @@ function run(line: string) {
   switch (cmd) {
     case '': return;
     case 'add': if (rest[0]) state = addTrack(state, ME, rest[0], rest[0]); break;
-    case 't': state = toggleCell(state, ME, rest[0], Number(rest[1]) - 1); break;
+    case 't': for (const s of parseSteps(rest.slice(1))) state = toggleCell(state, ME, rest[0], s); break;
     case 'mute': state = setTrackStatus(state, ME, rest[0], 'muted'); break;
     case 'unmute': state = setTrackStatus(state, ME, rest[0], 'active'); break;
     case 'del': state = setTrackStatus(state, ME, rest[0], 'deleted'); break;
