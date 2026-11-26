@@ -122,20 +122,20 @@ export class AudioEngine {
     await this.ctx.close();
   }
 
-  private schedule(s: State, sessionNow: number) {
+  private schedule(state: State, sessionNow: number) {
     // Play, stop and tempo changes write a new playback value with a new stamp, and its steps are
     // counted from the new anchor, so start counting again.
-    const anchor = `${s.playback.stamp.ver}:${s.playback.stamp.node}`;
+    const anchor = `${state.playback.stamp.ver}:${state.playback.stamp.node}`;
     if (anchor !== this.anchor) {
       this.anchor = anchor;
       this.nextK = 0;
     }
     // Decode samples as soon as they are stored, so their first hit isn't lost to decoding.
-    for (const key of Object.keys(s.tracks)) if (!this.buffers.has(key)) this.loadSample(key);
+    for (const key of Object.keys(state.tracks)) if (!this.buffers.has(key)) this.loadSample(key);
     const audioNow = this.ctx.currentTime;
     const latency = this.latencyMs;
     // Steps to be heard between "just now" and the end of the lookahead window.
-    for (const hit of stepsBetween(s, sessionNow - MAX_LATE_MS, sessionNow + latency + LOOKAHEAD_MS)) {
+    for (const hit of stepsBetween(state, sessionNow - MAX_LATE_MS, sessionNow + latency + LOOKAHEAD_MS)) {
       if (hit.k < this.nextK) continue; // already scheduled
       this.nextK = hit.k + 1;
       const startAt = audioNow + (hit.time - sessionNow - latency) / 1000;

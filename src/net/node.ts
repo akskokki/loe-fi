@@ -178,10 +178,10 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
 
   /**
    * Make a local change with one of the edit functions from state.ts, e.g.
-   * `node.edit((s, me) => toggleCell(s, me, 'preset:kick', 0))`. Logs and sends the change right
+   * `node.edit((state, me) => toggleCell(state, me, 'preset:kick', 0))`. Logs and sends the change right
    * away. Returns the change descriptions; empty if nothing changed.
    */
-  edit(change: (s: State, me: NodeId) => State): string[] {
+  edit(change: (state: State, me: NodeId) => State): string[] {
     const before = this.state;
     this.state = change(this.state, this.id);
     const changes = describeChanges(before, this.state);
@@ -204,7 +204,7 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
    */
   addSample(bytes: Uint8Array, name: string): string {
     const key = sampleKey(this.store.put(bytes));
-    this.edit((s, me) => addTrack(s, me, key, name));
+    this.edit((state, me) => addTrack(state, me, key, name));
     return key;
   }
 

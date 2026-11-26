@@ -15,8 +15,8 @@
 // - A member entry is a single register that only the member itself writes. Its version is the
 //   heartbeat. Entries are never removed (another copy would bring them back); whether a member is
 //   alive is decided locally from whether its version keeps increasing.
-// - Tracks are keyed by preset name (presets.ts) instead of a sample hash, so each preset can be
-//   used by one track at most.
+// - A track's key is `preset:<name>` for a built-in sound or `sha256:<hash>` for a sample file
+//   (samples/keys.ts), so each sound can be used by one track at most.
 //
 // All functions are pure: they return a new state and never modify their arguments.
 
@@ -28,13 +28,13 @@ export type NodeId = number;
 export type Stamp = { ver: number; node: NodeId };
 
 /** A value with its own stamp: the unit that last-writer-wins applies to. */
-export type Reg<T> = { value: T; stamp: Stamp };
+export type Register<T> = { value: T; stamp: Stamp };
 
 export const MAX_STEPS = 32;
 export const NO_STAMP: Stamp = { ver: 0, node: 0 };
 
 export type Settings = {
-  steps: Reg<number>; // 1..MAX_STEPS
+  steps: Register<number>; // 1..MAX_STEPS
 };
 
 export type Playback = {
@@ -48,9 +48,9 @@ export type Playback = {
 export type TrackStatus = 'active' | 'muted' | 'deleted';
 
 export type Track = {
-  name: Reg<string>; // shown in the UI; the preset name for now
-  status: Reg<TrackStatus>; // 'deleted' is a tombstone: the track stays so older copies can't bring it back
-  cells: Reg<boolean>[]; // always MAX_STEPS long
+  name: Register<string>; // shown in the UI: the preset's name, or the sample's file name
+  status: Register<TrackStatus>; // 'deleted' is a tombstone: the track stays so older copies can't bring it back
+  cells: Register<boolean>[]; // always MAX_STEPS long
 };
 
 export type MemberInfo = {
@@ -65,9 +65,9 @@ export type MemberInfo = {
 
 export type State = {
   settings: Settings;
-  playback: Reg<Playback>;
-  tracks: Record<string, Track>; // key: preset name
-  members: Record<string, Reg<MemberInfo>>; // key: node ID
+  playback: Register<Playback>;
+  tracks: Record<string, Track>; // key: the track key, `preset:<name>` or `sha256:<hash>`
+  members: Record<string, Register<MemberInfo>>; // key: node ID
 };
 
 // --- Merge ---
@@ -77,7 +77,7 @@ export function newer(a: Stamp, b: Stamp): boolean {
   return a.ver !== b.ver ? a.ver > b.ver : a.node > b.node;
 }
 
-function pick<T>(local: Reg<T>, incoming: Reg<T> | undefined): Reg<T> {
+function pick<T>(local: Register<T>, incoming: Register<T> | undefined): Register<T> {
   return incoming && newer(incoming.stamp, local.stamp) ? incoming : local;
 }
 
@@ -89,7 +89,11 @@ function mergeTrack(local: Track, incoming: Track): Track {
   };
 }
 
-function mergeRecord<V>(local: Record<string, V>, incoming: Record<string, V>, mergeValue: (l: V, i: V) => V) {
+function mergeRecord<V>(
+  local: Record<string, V>,
+  incoming: Record<string, V>,
+  mergeValue: (local: V, incoming: V) => V,
+) {
   const out = { ...local };
   for (const [key, value] of Object.entries(incoming)) {
     if (key === '__proto__') continue; // keys come from the network; assigning this one would replace out's prototype
@@ -110,15 +114,16 @@ export function merge(local: State, incoming: State): State {
 
 // --- Local changes ---
 
-function write<T>(reg: Reg<T>, value: T, me: NodeId): Reg<T> {
-  return { value, stamp: { ver: reg.stamp.ver + 1, node: me } };
+/** A new version of `register` holding `value`, stamped by this node. */
+function write<T>(register: Register<T>, value: T, me: NodeId): Register<T> {
+  return { value, stamp: { ver: register.stamp.ver + 1, node: me } };
 }
 
-const unset = <T>(value: T): Reg<T> => ({ value, stamp: NO_STAMP });
+const unset = <T>(value: T): Register<T> => ({ value, stamp: NO_STAMP });
 
-/** Own-property lookup, so a name like "constructor" is not found on Object.prototype. */
-const getTrack = (s: State, hash: string): Track | undefined =>
-  Object.hasOwn(s.tracks, hash) ? s.tracks[hash] : undefined;
+/** Own-property lookup, so a key like "constructor" is not found on Object.prototype. */
+const getTrack = (state: State, trackKey: string): Track | undefined =>
+  Object.hasOwn(state.tracks, trackKey) ? state.tracks[trackKey] : undefined;
 
 export function emptyState(): State {
   return {
@@ -129,35 +134,40 @@ export function emptyState(): State {
   };
 }
 
-/** Add a track for a preset. Adding a preset whose track was deleted brings that track back with its old cells. */
-export function addTrack(s: State, me: NodeId, hash: string, name: string): State {
-  if (getTrack(s, hash)) return setTrackStatus(s, me, hash, 'active');
+/**
+ * Add a track. `me` is this node's ID, as in all the functions below. Adding a sound whose track
+ * was deleted brings that track back with its old cells.
+ */
+export function addTrack(state: State, me: NodeId, trackKey: string, name: string): State {
+  if (getTrack(state, trackKey)) return setTrackStatus(state, me, trackKey, 'active');
   const track: Track = {
     name: write(unset(name), name, me),
     status: write(unset<TrackStatus>('active'), 'active', me),
     cells: Array.from({ length: MAX_STEPS }, () => unset(false)),
   };
-  return { ...s, tracks: { ...s.tracks, [hash]: track } };
+  return { ...state, tracks: { ...state.tracks, [trackKey]: track } };
 }
 
-export function setTrackStatus(s: State, me: NodeId, hash: string, status: TrackStatus): State {
-  const t = getTrack(s, hash);
-  if (!t || t.status.value === status) return s;
-  return { ...s, tracks: { ...s.tracks, [hash]: { ...t, status: write(t.status, status, me) } } };
+export function setTrackStatus(state: State, me: NodeId, trackKey: string, status: TrackStatus): State {
+  const track = getTrack(state, trackKey);
+  if (!track || track.status.value === status) return state;
+  return { ...state, tracks: { ...state.tracks, [trackKey]: { ...track, status: write(track.status, status, me) } } };
 }
 
-export function toggleCell(s: State, me: NodeId, hash: string, step: number): State {
-  const t = getTrack(s, hash);
-  if (!t || !Number.isInteger(step) || step < 0 || step >= MAX_STEPS) return s;
-  const cells = t.cells.slice();
+/** Turn a step on or off. `step` counts from 0. */
+export function toggleCell(state: State, me: NodeId, trackKey: string, step: number): State {
+  const track = getTrack(state, trackKey);
+  if (!track || !Number.isInteger(step) || step < 0 || step >= MAX_STEPS) return state;
+  const cells = track.cells.slice();
   cells[step] = write(cells[step], !cells[step].value, me);
-  return { ...s, tracks: { ...s.tracks, [hash]: { ...t, cells } } };
+  return { ...state, tracks: { ...state.tracks, [trackKey]: { ...track, cells } } };
 }
 
-export function setSteps(s: State, me: NodeId, steps: number): State {
-  const n = Math.min(MAX_STEPS, Math.max(1, Math.round(steps)));
-  if (n === s.settings.steps.value) return s;
-  return { ...s, settings: { ...s.settings, steps: write(s.settings.steps, n, me) } };
+/** Set how many steps the pattern has, clamped to 1..MAX_STEPS. */
+export function setSteps(state: State, me: NodeId, steps: number): State {
+  const clamped = Math.min(MAX_STEPS, Math.max(1, Math.round(steps)));
+  if (clamped === state.settings.steps.value) return state;
+  return { ...state, settings: { ...state.settings, steps: write(state.settings.steps, clamped, me) } };
 }
 
 /**
@@ -165,21 +175,26 @@ export function setSteps(s: State, me: NodeId, steps: number): State {
  * position: stopping freezes it, playing continues from it, and a tempo change continues from it
  * at the new speed.
  */
-export function updatePlayback(s: State, me: NodeId, now: number, change: { playing?: boolean; bpm?: number }): State {
-  const p = s.playback.value;
+export function updatePlayback(
+  state: State,
+  me: NodeId,
+  now: number,
+  change: { playing?: boolean; bpm?: number },
+): State {
+  const current = state.playback.value;
   const next: Playback = {
-    playing: change.playing ?? p.playing,
-    bpm: change.bpm ?? p.bpm,
-    step: playheadAt(s, now),
+    playing: change.playing ?? current.playing,
+    bpm: change.bpm ?? current.bpm,
+    step: playheadAt(state, now),
     at: now,
   };
-  return { ...s, playback: write(s.playback, next, me) };
+  return { ...state, playback: write(state.playback, next, me) };
 }
 
 /** Bump this node's own member entry. Called before every STATE send; the version is the heartbeat. */
-export function heartbeat(s: State, me: NodeId, info: MemberInfo): State {
-  const own = s.members[me] ?? unset(info);
-  return { ...s, members: { ...s.members, [me]: write(own, info, me) } };
+export function heartbeat(state: State, me: NodeId, info: MemberInfo): State {
+  const own = state.members[me] ?? unset(info);
+  return { ...state, members: { ...state.members, [me]: write(own, info, me) } };
 }
 
 // --- Derived values ---
@@ -189,7 +204,8 @@ function canonical(x: unknown): string {
   if (Array.isArray(x)) return `[${x.map(canonical).join(',')}]`;
   if (typeof x === 'object' && x !== null) {
     const keys = Object.keys(x).sort();
-    return `{${keys.map((k) => `${JSON.stringify(k)}:${canonical((x as Record<string, unknown>)[k])}`).join(',')}}`;
+    const fields = keys.map((key) => `${JSON.stringify(key)}:${canonical((x as Record<string, unknown>)[key])}`);
+    return `{${fields.join(',')}}`;
   }
   return JSON.stringify(x);
 }
@@ -199,25 +215,25 @@ function canonical(x: unknown): string {
  * set of members with their names. Member heartbeats are left out because they keep changing while
  * nodes run. Two nodes with the same fingerprint have the same sequencer state.
  */
-export function fingerprint(s: State): string {
-  const members = Object.entries(s.members)
-    .map(([id, m]) => [id, m.value.name])
+export function fingerprint(state: State): string {
+  const members = Object.entries(state.members)
+    .map(([id, member]) => [id, member.value.name])
     .sort();
-  const shared = { settings: s.settings, playback: s.playback, tracks: s.tracks, members };
+  const shared = { settings: state.settings, playback: state.playback, tracks: state.tracks, members };
   return createHash('sha256').update(canonical(shared)).digest('hex').slice(0, 12);
 }
 
 /** A member's display name, or its node ID if it has no entry (yet). */
-export function memberName(s: State, id: NodeId): string {
-  return Object.hasOwn(s.members, id) ? s.members[id].value.name : String(id);
+export function memberName(state: State, id: NodeId): string {
+  return Object.hasOwn(state.members, id) ? state.members[id].value.name : String(id);
 }
 
 export const stepDurationMs = (bpm: number) => 60_000 / bpm / 4; // one step is a 16th note
 
 /** The step the playhead is on at session time `now` (ms). */
-export function playheadAt(s: State, now: number): number {
-  const p = s.playback.value;
-  const steps = s.settings.steps.value;
-  const elapsed = p.playing ? Math.floor((now - p.at) / stepDurationMs(p.bpm)) : 0;
-  return (((p.step + elapsed) % steps) + steps) % steps;
+export function playheadAt(state: State, now: number): number {
+  const playback = state.playback.value;
+  const steps = state.settings.steps.value;
+  const elapsed = playback.playing ? Math.floor((now - playback.at) / stepDurationMs(playback.bpm)) : 0;
+  return (((playback.step + elapsed) % steps) + steps) % steps;
 }

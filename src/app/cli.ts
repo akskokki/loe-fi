@@ -26,8 +26,8 @@ export type CommonArgs = {
 };
 
 /** Parses "host:port" (port defaults to 7051). */
-export function parseAddress(s: string): Address {
-  const [address, port] = s.split(':');
+export function parseAddress(hostAndPort: string): Address {
+  const [address, port] = hostAndPort.split(':');
   return { address, port: Number(port ?? 7051) };
 }
 

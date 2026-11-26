@@ -16,20 +16,21 @@ export type Hit = {
  * The steps that start in the session time range [from, to), with the active tracks that have a
  * hit on each. Uses the same anchor arithmetic as playheadAt(), so sound and playhead agree.
  */
-export function stepsBetween(s: State, from: number, to: number): Hit[] {
-  const p = s.playback.value;
-  if (!p.playing) return [];
-  const dur = stepDurationMs(p.bpm);
-  const steps = s.settings.steps.value;
-  const tracks = Object.entries(s.tracks).filter(([, t]) => t.status.value === 'active');
+export function stepsBetween(state: State, from: number, to: number): Hit[] {
+  const playback = state.playback.value;
+  if (!playback.playing) return [];
+  const stepMs = stepDurationMs(playback.bpm);
+  const steps = state.settings.steps.value;
+  const activeTracks = Object.entries(state.tracks).filter(([, track]) => track.status.value === 'active');
   const hits: Hit[] = [];
-  for (let k = Math.max(0, Math.ceil((from - p.at) / dur)); p.at + k * dur < to; k++) {
-    const step = (((p.step + k) % steps) + steps) % steps;
+  // k counts steps from the anchor; start at the first one at or after `from`.
+  for (let k = Math.max(0, Math.ceil((from - playback.at) / stepMs)); playback.at + k * stepMs < to; k++) {
+    const step = (((playback.step + k) % steps) + steps) % steps;
     hits.push({
       k,
-      time: p.at + k * dur,
+      time: playback.at + k * stepMs,
       step,
-      tracks: tracks.filter(([, t]) => t.cells[step].value).map(([key]) => key),
+      tracks: activeTracks.filter(([, track]) => track.cells[step].value).map(([key]) => key),
     });
   }
   return hits;

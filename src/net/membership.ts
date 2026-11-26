@@ -41,7 +41,7 @@ export class Membership {
 
   /** IDs of the other members that are currently alive. */
   live(): NodeId[] {
-    return [...this.liveness].filter(([, l]) => l.alive).map(([id]) => id);
+    return [...this.liveness].filter(([, liveness]) => liveness.alive).map(([id]) => id);
   }
 
   /** Where to reach a member: the address its packets come from, or else the one in its entry. */
@@ -60,11 +60,11 @@ export class Membership {
     const out = new Map<string, Address>();
     for (const key of Object.keys(state.members)) {
       const id = Number(key);
-      const l = this.liveness.get(id);
+      const liveness = this.liveness.get(id);
       // A member we only just learned about from someone else gets our STATE for a few seconds, so
       // it can answer directly instead of us waiting for its heartbeat to move in gossip.
-      const justLearned = l !== undefined && !l.everAlive && now - l.changedAt < PEER_TIMEOUT_MS;
-      if (id === this.me || !(includeGone || l?.alive || justLearned)) continue;
+      const justLearned = liveness !== undefined && !liveness.everAlive && now - liveness.changedAt < PEER_TIMEOUT_MS;
+      if (id === this.me || !(includeGone || liveness?.alive || justLearned)) continue;
       const addr = this.addressOf(state, id);
       if (addr) out.set(`${addr.address}:${addr.port}`, addr);
     }
@@ -113,9 +113,9 @@ export class Membership {
   view(state: State, now = Date.now()): MemberView[] {
     return Object.entries(state.members).map(([key, entry]) => {
       const id = Number(key);
-      const l = this.liveness.get(id);
+      const liveness = this.liveness.get(id);
       const status: MemberStatus =
-        id === this.me ? 'me' : l?.alive ? 'alive' : l?.everAlive ? 'gone' : 'not heard from';
+        id === this.me ? 'me' : liveness?.alive ? 'alive' : liveness?.everAlive ? 'gone' : 'not heard from';
       return {
         id,
         name: entry.value.name,
@@ -123,8 +123,8 @@ export class Membership {
         port: entry.value.port,
         heartbeat: entry.stamp.ver,
         status,
-        seenMsAgo: l && status === 'alive' ? now - l.changedAt : undefined,
-        goneForMs: l?.goneAt !== undefined && status === 'gone' ? now - l.goneAt : undefined,
+        seenMsAgo: liveness && status === 'alive' ? now - liveness.changedAt : undefined,
+        goneForMs: liveness?.goneAt !== undefined && status === 'gone' ? now - liveness.goneAt : undefined,
       };
     });
   }

@@ -49,25 +49,27 @@ function ranges(nums: number[]): string {
 }
 
 /** The grid as text, e.g. `kick   active  x... x... x... x...`, with a ^ under the playhead. */
-export function renderGrid(s: State, now: number): string[] {
-  const steps = s.settings.steps.value;
-  const p = s.playback.value;
-  const head = playheadAt(s, now);
-  const lines = [`${p.playing ? 'playing' : 'stopped'} · ${p.bpm} BPM · ${steps} steps · playhead on step ${head + 1}`];
+export function renderGrid(state: State, now: number): string[] {
+  const steps = state.settings.steps.value;
+  const playback = state.playback.value;
+  const playhead = playheadAt(state, now);
+  const lines = [
+    `${playback.playing ? 'playing' : 'stopped'} · ${playback.bpm} BPM · ${steps} steps · playhead on step ${playhead + 1}`,
+  ];
 
-  const tracks = Object.values(s.tracks)
-    .filter((t) => t.status.value !== 'deleted')
+  const tracks = Object.values(state.tracks)
+    .filter((track) => track.status.value !== 'deleted')
     .sort((a, b) => a.name.value.localeCompare(b.name.value));
   if (tracks.length === 0) return [...lines, '(no tracks yet: add one with "add <name>")'];
 
-  const row = (cell: (i: number) => string) =>
-    Array.from({ length: steps }, (_, i) => cell(i) + (i % 4 === 3 ? ' ' : '')).join('');
-  const width = Math.max(8, ...tracks.map((t) => t.name.value.length)); // names are at most 16 characters
-  for (const t of tracks) {
-    lines.push(
-      `${t.name.value.padEnd(width)} ${t.status.value.padEnd(7)} ${row((i) => (t.cells[i].value ? 'x' : '.'))}`,
-    );
+  // One character per step, with a space after every fourth.
+  const row = (cell: (step: number) => string) =>
+    Array.from({ length: steps }, (_, step) => cell(step) + (step % 4 === 3 ? ' ' : '')).join('');
+  const nameWidth = Math.max(8, ...tracks.map((track) => track.name.value.length)); // names are at most 16 characters
+  for (const track of tracks) {
+    const cells = row((step) => (track.cells[step].value ? 'x' : '.'));
+    lines.push(`${track.name.value.padEnd(nameWidth)} ${track.status.value.padEnd(7)} ${cells}`);
   }
-  lines.push(`${''.padEnd(width + 9)}${row((i) => (i === head ? '^' : ' '))}`);
+  lines.push(`${''.padEnd(nameWidth + 9)}${row((step) => (step === playhead ? '^' : ' '))}`);
   return lines;
 }

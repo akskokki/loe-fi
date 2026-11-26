@@ -27,15 +27,16 @@ export function soundOf(key: string): Sound | null {
  * track that isn't deleted has it, else by a key prefix that matches exactly one track (e.g.
  * `sha256:3f2a`). Returns the key, or an error message.
  */
-export function findTrack(s: State, ref: string): { key: string } | { error: string } {
-  const keys = Object.keys(s.tracks);
+export function findTrack(state: State, ref: string): { key: string } | { error: string } {
+  const keys = Object.keys(state.tracks);
   if (keys.includes(ref)) return { key: ref };
-  const live = keys.filter((k) => s.tracks[k].status.value !== 'deleted');
-  const byName = live.filter((k) => s.tracks[k].name.value === ref);
+  const live = keys.filter((key) => state.tracks[key].status.value !== 'deleted');
+  const byName = live.filter((key) => state.tracks[key].name.value === ref);
   if (byName.length === 1) return { key: byName[0] };
-  if (byName.length > 1)
+  if (byName.length > 1) {
     return { error: `several tracks are called "${ref}"; use the start of a key: ${byName.join(', ')}` };
-  const byPrefix = keys.filter((k) => k.startsWith(ref));
+  }
+  const byPrefix = keys.filter((key) => key.startsWith(ref));
   if (ref.length >= 8 && byPrefix.length === 1) return { key: byPrefix[0] };
   return { error: `no track "${ref}"` };
 }
