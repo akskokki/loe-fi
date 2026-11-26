@@ -173,6 +173,7 @@ function App() {
   const [cursor, setCursor] = useState({ track: 0, step: 0 });
   const [playhead, setPlayhead] = useState(0);
   const [adding, setAdding] = useState<string | null>(null); // track name being typed, or null
+  const [deleting, setDeleting] = useState<string | null>(null); // hash of the track awaiting y/n, or null
 
   // Redraw when the state, a member's liveness or the log changes.
   useEffect(() => {
@@ -219,12 +220,13 @@ function App() {
       case 'mute':
         if (selected) node.edit((s, me) => setTrackStatus(s, me, selected[0], selected[1].status.value === 'muted' ? 'active' : 'muted'));
         break;
-      case 'delete': if (selected) node.edit((s, me) => setTrackStatus(s, me, selected[0], 'deleted')); break;
+      case 'delete': if (selected) setDeleting(selected[0]); break;
       case 'quit': exit(); break;
     }
   };
 
   useMouseClicks((x, y) => {
+    if (deleting !== null) return; // answer the y/n question first
     const target = hitTest(x, y, segments, tracks.length, steps);
     if (target?.kind === 'action') run(target.action);
     else if (target?.kind === 'track') setCursor((c) => ({ ...c, track: target.track }));
@@ -235,6 +237,11 @@ function App() {
   });
 
   useInput((input, key) => {
+    if (deleting !== null) {
+      if (input === 'y' || input === 'Y') node.edit((s, me) => setTrackStatus(s, me, deleting, 'deleted'));
+      setDeleting(null); // any other key cancels
+      return;
+    }
     if (adding !== null) {
       if (key.escape) setAdding(null);
       else if (key.return) {
@@ -313,7 +320,11 @@ function App() {
       </Box>
 
       <Box marginTop={1}>
-        {adding !== null ? (
+        {deleting !== null ? (
+          <Text>
+            Delete track <Text color="red">{state.tracks[deleting]?.name.value}</Text>? <Text dimColor>(y/n)</Text>
+          </Text>
+        ) : adding !== null ? (
           <Text>
             New track name: <Text color="cyan">{adding}</Text>
             <Text inverse> </Text> <Text dimColor>(Enter to add, Esc to cancel)</Text>
