@@ -16,7 +16,15 @@ Real-time multiplayer drum sequencer. Design: [docs/design-plan.tex](docs/design
 | `src/app/` | | The programs: the terminal UI (`npm run ui`) and the headless peer (`npm run peer`) |
 | `src/tools/` | | The convergence test harness (`npm run harness`) |
 
-`npm test` runs the tests, `npm run check` type-checks.
+| Command | What |
+|---|---|
+| `npm test` | Unit tests |
+| `npm run check` | Type check |
+| `npm run lint` | Lint and formatting check ([Biome](https://biomejs.dev), configured in `biome.json`) |
+| `npm run format` | Format all source files |
+| `npm run harness` | Convergence test with several peers on this machine (below) |
+
+GitHub Actions runs the lint, the type check, the tests and a short harness run on every push (`.github/workflows/ci.yml`).
 
 ## Convergence test harness
 
