@@ -16,7 +16,7 @@ import readline from 'node:readline';
 import { parseArgs } from 'node:util';
 import type { Address, Msg } from './messages.js';
 import {
-  addTrack, emptyState, heartbeat, merge, setSteps, setTrackStatus, toggleCell, updatePlayback,
+  addTrack, emptyState, heartbeat, isState, merge, setSteps, setTrackStatus, toggleCell, updatePlayback,
   type NodeId, type State,
 } from './state.js';
 import { describeChanges, renderGrid } from './describe.js';
@@ -118,31 +118,50 @@ function updateLiveness(now: number) {
   }
 }
 
+/** Shape check, so a packet from an older version of this program is reported instead of crashing us or spreading. */
+function wellFormed(m: any): m is Msg {
+  if (typeof m !== 'object' || m === null || typeof m.from !== 'number') return false;
+  if (m.type === 'JOIN') return true;
+  return m.type === 'STATE' && typeof m.to?.address === 'string' && Number.isInteger(m.to.port) && isState(m.state);
+}
+
 sock.on('message', (buf, rinfo) => {
   if (offline()) return;
-  let msg: Msg;
+  const where = `${rinfo.address}:${rinfo.port}`;
+  let msg: unknown;
   try {
     msg = JSON.parse(buf.toString());
   } catch {
-    log(`ignored a non-JSON packet from ${rinfo.address}:${rinfo.port}`);
+    log(`ignored a non-JSON packet from ${where}`);
     return;
   }
+  if (!wellFormed(msg)) {
+    log(`ignored a message in an unknown format from ${where} (is it running an older version? git pull there)`);
+    return;
+  }
+  try {
+    handle(msg, { address: rinfo.address, port: rinfo.port }, buf.length);
+  } catch (err) {
+    log(`error handling ${msg.type} from ${msg.from} (${where}): ${(err as Error).stack}`);
+  }
+});
+
+function handle(msg: Msg, from: Address, bytes: number) {
   if (msg.from === ME) return;
-  const from: Address = { address: rinfo.address, port: rinfo.port };
   observed.set(msg.from, from);
 
   if (msg.type === 'JOIN') {
     log(`<- JOIN from ${msg.from} (${from.address}:${from.port})`);
     sendState(from);
   } else if (msg.type === 'STATE') {
-    if (args.verbose) log(`<- STATE from ${msg.from} (${from.address}:${from.port}, ${buf.length} bytes)`);
+    if (args.verbose) log(`<- STATE from ${msg.from} (${from.address}:${from.port}, ${bytes} bytes)`);
     learnAddress(msg.to);
     const before = state;
     state = merge(state, msg.state);
     for (const line of describeChanges(before, state)) log(`<- ${line}`);
     updateLiveness(Date.now());
   }
-});
+}
 
 sock.on('error', (err) => {
   log(`socket error: ${err.message}`);

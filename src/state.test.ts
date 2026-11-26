@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  addTrack, emptyState, heartbeat, merge, playheadAt, setSteps, setTrackStatus, stepDurationMs,
+  addTrack, emptyState, heartbeat, isState, merge, playheadAt, setSteps, setTrackStatus, stepDurationMs,
   toggleCell, updatePlayback, type NodeId, type State, type TrackStatus,
 } from './state.js';
 
@@ -56,6 +56,23 @@ test('a network key "__proto__" does not change the prototype', () => {
   const evil = JSON.parse('{"settings":{},"playback":{"value":{},"stamp":{"ver":0,"node":0}},"tracks":{"__proto__":{"x":1}},"members":{}}');
   const merged = merge(emptyState(), evil);
   assert.equal(Object.getPrototypeOf(merged.tracks), Object.prototype);
+});
+
+test('isState accepts real states and rejects broken ones', () => {
+  const good = heartbeat(toggleCell(addTrack(emptyState(), A, 'kick', 'kick.wav'), A, 'kick', 1), A, member(7051));
+  assert.ok(isState(JSON.parse(JSON.stringify(good))));
+  const broken = (edit: (s: any) => void) => {
+    const s = JSON.parse(JSON.stringify(good));
+    edit(s);
+    return s;
+  };
+  assert.ok(!isState(broken((s) => { s.tracks.kick = {}; })));
+  assert.ok(!isState(broken((s) => { s.tracks.kick.cells.pop(); })));
+  assert.ok(!isState(broken((s) => { s.tracks.kick.status.value = 'gone'; })));
+  assert.ok(!isState(broken((s) => { s.settings.steps.value = 0; })));
+  assert.ok(!isState(broken((s) => { delete s.playback.value.bpm; })));
+  assert.ok(!isState(broken((s) => { s.members[A].stamp = null; })));
+  assert.ok(!isState({ type: 'STATE', from: 42, beat: 3, members: [] })); // the old connection-test message
 });
 
 // --- Convergence: merge must be commutative, associative and idempotent ---

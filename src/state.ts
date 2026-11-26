@@ -92,7 +92,7 @@ function mergeRecord<V>(local: Record<string, V>, incoming: Record<string, V>, m
   return out;
 }
 
-/** Merge an incoming copy of the state into the local one. Incoming messages are trusted to have the right shape for now. */
+/** Merge an incoming copy of the state into the local one. Check incoming copies with isState() first. */
 export function merge(local: State, incoming: State): State {
   return {
     settings: { steps: pick(local.settings.steps, incoming.settings?.steps) },
@@ -100,6 +100,34 @@ export function merge(local: State, incoming: State): State {
     tracks: mergeRecord(local.tracks, incoming.tracks ?? {}, mergeTrack),
     members: mergeRecord(local.members, incoming.members ?? {}, pick),
   };
+}
+
+// --- Checking incoming copies ---
+
+const isObj = (x: unknown): x is Record<string, any> => typeof x === 'object' && x !== null && !Array.isArray(x);
+const isStamp = (x: any) => isObj(x) && Number.isInteger(x.ver) && x.ver >= 0 && typeof x.node === 'number';
+const isReg = (x: any, isValue: (v: any) => boolean) => isObj(x) && isStamp(x.stamp) && isValue(x.value);
+const STATUSES = ['active', 'muted', 'deleted'];
+
+const isTrack = (t: any) =>
+  isObj(t) && isReg(t.name, (v) => typeof v === 'string') && isReg(t.status, (v) => STATUSES.includes(v))
+  && Array.isArray(t.cells) && t.cells.length === MAX_STEPS && t.cells.every((c: any) => isReg(c, (v) => typeof v === 'boolean'));
+
+const isMember = (m: any) =>
+  isReg(m, (v) => isObj(v) && (v.address === null || typeof v.address === 'string') && Number.isInteger(v.port)
+    && Array.isArray(v.samples) && v.samples.every((h: unknown) => typeof h === 'string'));
+
+const isPlayback = (p: any) =>
+  isObj(p) && typeof p.playing === 'boolean' && typeof p.bpm === 'number' && p.bpm > 0
+  && Number.isInteger(p.step) && p.step >= 0 && typeof p.at === 'number';
+
+/** True if x (e.g. parsed from a message) has exactly the shape merge() expects. Check before merging. */
+export function isState(x: unknown): x is State {
+  return isObj(x)
+    && isObj(x.settings) && isReg(x.settings.steps, (v) => Number.isInteger(v) && v >= 1 && v <= MAX_STEPS)
+    && isReg(x.playback, isPlayback)
+    && isObj(x.tracks) && Object.values(x.tracks).every(isTrack)
+    && isObj(x.members) && Object.values(x.members).every(isMember);
 }
 
 // --- Local changes ---
