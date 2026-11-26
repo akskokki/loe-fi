@@ -1,10 +1,15 @@
-// The terminal UI's screen: the grid, the controls, the members and the log, on top of a PeerNode.
-import { useEffect, useReducer, useRef, useState } from 'react';
-import { Box, Text, useApp, useInput } from 'ink';
-import type { PeerNode } from '../../net/node.js';
+// The terminal UI's screen, on top of a PeerNode: the controls, the grid, the members and the log.
+// This component holds the UI's own state (cursor, prompts), turns mouse clicks and keys into
+// actions, and lays the parts out within the terminal's height (fit.ts).
+import { useRef } from 'react';
+import { Box, Text, useApp, useInput, type Key } from 'ink';
+import type { AudioEngine } from '../../audio/engine.js';
+import { PRESETS } from '../../audio/presets.js';
+import type { MemberStatus, PeerNode } from '../../net/node.js';
+import { addSampleFile } from '../../samples/addfile.js';
+import { presetKey } from '../../samples/keys.js';
 import {
   addTrack,
-  playheadAt,
   setSteps,
   setTrackStatus,
   toggleCell,
@@ -12,30 +17,19 @@ import {
   type State,
   type Track,
 } from '../../state/state.js';
-import { PRESETS } from '../../audio/presets.js';
-import type { AudioEngine } from '../../audio/engine.js';
-import { presetKey } from '../../samples/keys.js';
-import { addSampleFile } from '../../samples/addfile.js';
 import { localAddresses } from '../cli.js';
-import {
-  BANNER,
-  BANNER_COLORS,
-  CELL_WIDTH,
-  CONTROL_ROW_STEP,
-  LABEL_WIDTH,
-  PAD,
-  TRACKS_ROW,
-  controlRows,
-  hitTest,
-  type Action,
-} from './layout.js';
-import { useMouseClicks } from './mouse.js';
-import { HelpLine, StepRow, labels } from './components.js';
+import { fitToHeight } from './fit.js';
+import { Grid } from './Grid.js';
+import { Header } from './Header.js';
+import { usePlayhead, useRedraw, useTerminalRows } from './hooks.js';
+import { PAD, controlRows, hitTest, type Action } from './layout.js';
 import type { LogBuffer } from './log.js';
+import { useMouseClicks } from './mouse.js';
+import { LogPanel, MembersPanel } from './Panels.js';
+import { Prompt, type PromptState } from './Prompt.js';
 
-export const LOG_LINES = 8; // at most; fewer when the terminal is short
-const MAX_MEMBERS_SHOWN = 6; // the rest are summed up in one line
 const GONE_SHOWN_MS = 5000; // a member that timed out is listed as gone this long, then left out
+const MEMBER_ORDER: Record<MemberStatus, number> = { me: 0, alive: 1, gone: 2, 'not heard from': 3 };
 
 export type AppProps = {
   node: PeerNode;
@@ -44,111 +38,101 @@ export type AppProps = {
   audio: AudioEngine | null;
   audioOff: string;
   port: string;
-  /** Forget Ink's last frame (see the resize handler). */
+  /** Forget Ink's last frame (see useTerminalRows). */
   clearScreen: () => void;
 };
 
-/** Visible tracks as [hash, track], in the same order on every node. */
+/** Tracks that aren't deleted, as [track key, track], sorted by name so every node shows the same order. */
 function visibleTracks(state: State): [string, Track][] {
   return Object.entries(state.tracks)
-    .filter(([, t]) => t.status.value !== 'deleted')
+    .filter(([, track]) => track.status.value !== 'deleted')
     .sort(([, a], [, b]) => a.name.value.localeCompare(b.name.value));
 }
 
+/** What the keyboard is driving: the grid, or one of the prompts under it. */
+type Mode =
+  | { kind: 'grid' }
+  | { kind: 'pickSound' }
+  | { kind: 'filePath'; path: string }
+  | { kind: 'confirmDelete'; trackKey: string };
+
+/**
+ * The UI's own state. It lives in a ref, not in React state, because keys can arrive faster than
+ * the UI redraws (fast typing, a held arrow key): each key's handler must see what the key before
+ * it did, not the state as of the last redraw. Handlers change it and then ask for a redraw.
+ */
+type UiState = { cursor: { track: number; step: number }; mode: Mode };
+
 export function App({ node, logs, audio, audioOff, port, clearScreen }: AppProps) {
   const { exit } = useApp();
-  const [, rerender] = useReducer((n: number) => n + 1, 0);
-
-  // Terminal height (Ink draws to process.stdout), kept up to date when the window is resized.
-  const [rows, setRows] = useState(process.stdout.rows || 24);
+  const rows = useTerminalRows(clearScreen);
+  const redraw = useRedraw(node, logs);
+  const playhead = usePlayhead(node);
+  const ui = useRef<UiState>({ cursor: { track: 0, step: 0 }, mode: { kind: 'grid' } }).current;
   const tooSmall = useRef(false); // while the window is too short, the grid isn't drawn and clicks are ignored
-  useEffect(() => {
-    const onResize = () => {
-      // After a resize, Ink's in-place redraw would erase the wrong lines (it counts lines of the
-      // previous frame), so forget that frame, wipe the screen and draw the next frame from the top.
-      clearScreen();
-      process.stdout.write('\x1b[2J\x1b[H');
-      setRows(process.stdout.rows || 24);
+
+  /** The grid as it is right now, with the cursor kept inside it when tracks or steps disappear. */
+  const current = () => {
+    const state = node.state;
+    const steps = state.settings.steps.value;
+    const tracks = visibleTracks(state);
+    ui.cursor = {
+      track: Math.min(ui.cursor.track, Math.max(0, tracks.length - 1)),
+      step: Math.min(ui.cursor.step, steps - 1),
     };
-    process.stdout.on('resize', onResize);
-    return () => {
-      process.stdout.off('resize', onResize);
-    };
-  }, []);
-  const [cursor, setCursor] = useState({ track: 0, step: 0 });
-  const [playhead, setPlayhead] = useState(0);
-  const [adding, setAdding] = useState(false); // picking a preset for a new track
-  const [filePath, setFilePath] = useState<string | null>(null); // sample file path being typed, or null
-  const [deleting, setDeleting] = useState<string | null>(null); // hash of the track awaiting y/n, or null
-
-  // Redraw when the state, a member's liveness or the log changes.
-  useEffect(() => {
-    const update = () => rerender();
-    node.on('change', update);
-    const unsubscribe = logs.subscribe(update);
-    return () => {
-      node.off('change', update);
-      unsubscribe();
-    };
-  }, []);
-
-  // Redraw once a second, so gone members drop off the list on time even when nothing else changes.
-  useEffect(() => {
-    const id = setInterval(rerender, 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  // Recompute the playhead ~30x/s from session time; React skips the redraw when it is unchanged.
-  useEffect(() => {
-    const id = setInterval(() => setPlayhead(playheadAt(node.state, node.now())), 33);
-    return () => clearInterval(id);
-  }, []);
-
-  const state = node.state;
-  const steps = state.settings.steps.value;
-  const { playing, bpm } = state.playback.value;
-  const tracks = visibleTracks(state);
-  const cur = {
-    track: Math.min(cursor.track, Math.max(0, tracks.length - 1)),
-    step: Math.min(cursor.step, steps - 1),
+    const { playing, bpm } = state.playback.value;
+    return { state, steps, tracks, playing, bpm, controls: controlRows(playing, bpm, steps) };
   };
-  const selected = tracks[cur.track];
-  const controls = controlRows(playing, bpm, steps);
 
-  const toggle = (track: number, step: number) => {
-    const t = tracks[track];
-    if (t) node.edit((s, me) => toggleCell(s, me, t[0], step));
+  const setMode = (mode: Mode) => {
+    ui.mode = mode;
+    redraw();
+  };
+
+  const moveCursor = (track: number, step: number) => {
+    ui.cursor = { track, step };
+    redraw();
+  };
+
+  // --- Actions ---
+
+  const toggle = (row: number, step: number) => {
+    const trackKey = current().tracks[row]?.[0];
+    if (trackKey) node.edit((state, me) => toggleCell(state, me, trackKey, step));
   };
 
   const run = (action: Action) => {
+    const { tracks, steps, playing, bpm } = current();
+    const selected = tracks[ui.cursor.track]; // [track key, track], or undefined without tracks
     const now = node.now();
     switch (action) {
       case 'play':
-        node.edit((s, me) => updatePlayback(s, me, now, { playing: !playing }));
+        node.edit((state, me) => updatePlayback(state, me, now, { playing: !playing }));
         break;
       case 'bpmDown':
-        node.edit((s, me) => updatePlayback(s, me, now, { bpm: Math.max(20, bpm - 5) }));
+        node.edit((state, me) => updatePlayback(state, me, now, { bpm: Math.max(20, bpm - 5) }));
         break;
       case 'bpmUp':
-        node.edit((s, me) => updatePlayback(s, me, now, { bpm: Math.min(300, bpm + 5) }));
+        node.edit((state, me) => updatePlayback(state, me, now, { bpm: Math.min(300, bpm + 5) }));
         break;
       case 'stepsDown':
-        node.edit((s, me) => setSteps(s, me, steps - 1));
+        node.edit((state, me) => setSteps(state, me, steps - 1));
         break;
       case 'stepsUp':
-        node.edit((s, me) => setSteps(s, me, steps + 1));
+        node.edit((state, me) => setSteps(state, me, steps + 1));
         break;
       case 'add':
-        setAdding(true);
+        setMode({ kind: 'pickSound' });
         break;
       case 'mute':
-        if (selected)
-          node.edit((s, me) =>
-            setTrackStatus(s, me, selected[0], selected[1].status.value === 'muted' ? 'active' : 'muted'),
-          );
+        if (selected) {
+          const [trackKey, track] = selected;
+          const status = track.status.value === 'muted' ? 'active' : 'muted';
+          node.edit((state, me) => setTrackStatus(state, me, trackKey, status));
+        }
         break;
       case 'delete':
-        if (selected) setDeleting(selected[0]);
+        if (selected) setMode({ kind: 'confirmDelete', trackKey: selected[0] });
         break;
       case 'quit':
         exit();
@@ -156,52 +140,66 @@ export function App({ node, logs, audio, audioOff, port, clearScreen }: AppProps
     }
   };
 
+  const addFile = (path: string) => {
+    const file = path.trim().replace(/^~(?=\/)/, process.env.HOME ?? '~');
+    if (!file) return;
+    logs.log(`adding ${file}…`);
+    addSampleFile(node, file).then(
+      ({ note }) => note && logs.log(`added, but ${note}`),
+      (err: Error) => logs.log(err.message),
+    );
+  };
+
+  // --- Input ---
+
   useMouseClicks((x, y) => {
-    if (deleting !== null || filePath !== null || tooSmall.current) return; // answer the question or finish the path first
+    if (ui.mode.kind !== 'grid' || tooSmall.current) return; // answer the prompt first
+    const { controls, tracks, steps } = current();
     const target = hitTest(x, y, controls, tracks.length, steps);
     if (target?.kind === 'action') run(target.action);
-    else if (target?.kind === 'track') setCursor((c) => ({ ...c, track: target.track }));
+    else if (target?.kind === 'track') moveCursor(target.track, ui.cursor.step);
     else if (target?.kind === 'cell') {
-      setCursor({ track: target.track, step: target.step });
+      moveCursor(target.track, target.step);
       toggle(target.track, target.step);
     }
   });
 
-  useInput((input, key) => {
-    if (deleting !== null) {
-      if (input === 'y' || input === 'Y') node.edit((s, me) => setTrackStatus(s, me, deleting, 'deleted'));
-      setDeleting(null); // any other key cancels
-      return;
+  /** y deletes the track, any other key cancels. */
+  const answerDelete = (trackKey: string, input: string) => {
+    if (input === 'y' || input === 'Y') node.edit((state, me) => setTrackStatus(state, me, trackKey, 'deleted'));
+    setMode({ kind: 'grid' });
+  };
+
+  /** Typing (or pasting) the path; Enter adds the file, Esc cancels. */
+  const typePath = (path: string, input: string, key: Key) => {
+    if (key.escape) setMode({ kind: 'grid' });
+    else if (key.return) {
+      addFile(path);
+      setMode({ kind: 'grid' });
+    } else if (key.backspace || key.delete) setMode({ kind: 'filePath', path: path.slice(0, -1) });
+    else if (input && !key.ctrl && !key.meta && !/[\p{Cc}]/u.test(input)) {
+      setMode({ kind: 'filePath', path: path + input });
     }
-    if (filePath !== null) {
-      if (key.escape) setFilePath(null);
-      else if (key.return) {
-        const file = filePath.trim().replace(/^~(?=\/)/, process.env.HOME ?? '~');
-        if (file) {
-          logs.log(`adding ${file}…`);
-          addSampleFile(node, file).then(
-            ({ note }) => note && logs.log(`added, but ${note}`),
-            (err: Error) => logs.log(err.message),
-          );
-        }
-        setFilePath(null);
-      } else if (key.backspace || key.delete) setFilePath(filePath.slice(0, -1));
-      else if (input && !key.ctrl && !key.meta && !/[\p{Cc}]/u.test(input)) setFilePath(filePath + input); // typed or pasted text
-      return;
-    }
-    if (adding) {
-      const preset = PRESETS[Number(input) - 1];
-      if (preset) node.edit((s, me) => addTrack(s, me, presetKey(preset), preset));
-      else if (input === 'f') setFilePath('');
-      setAdding(false); // a number picks a sound, f asks for a file, any other key cancels
-      return;
-    }
-    const n = Math.max(1, tracks.length);
-    if (key.leftArrow) setCursor({ ...cur, step: (cur.step + steps - 1) % steps });
-    else if (key.rightArrow) setCursor({ ...cur, step: (cur.step + 1) % steps });
-    else if (key.upArrow) setCursor({ ...cur, track: (cur.track + n - 1) % n });
-    else if (key.downArrow) setCursor({ ...cur, track: (cur.track + 1) % n });
-    else if (input === ' ' || key.return) toggle(cur.track, cur.step);
+  };
+
+  /** A number picks a preset, f asks for a file, any other key cancels. */
+  const pickSound = (input: string) => {
+    const preset = PRESETS[Number(input) - 1];
+    if (input === 'f') return setMode({ kind: 'filePath', path: '' });
+    if (preset) node.edit((state, me) => addTrack(state, me, presetKey(preset), preset));
+    setMode({ kind: 'grid' });
+  };
+
+  /** Keys on the grid itself. */
+  const gridKey = (input: string, key: Key) => {
+    const { tracks, steps } = current();
+    const { track, step } = ui.cursor;
+    const trackCount = Math.max(1, tracks.length);
+    if (key.leftArrow) moveCursor(track, (step + steps - 1) % steps);
+    else if (key.rightArrow) moveCursor(track, (step + 1) % steps);
+    else if (key.upArrow) moveCursor((track + trackCount - 1) % trackCount, step);
+    else if (key.downArrow) moveCursor((track + 1) % trackCount, step);
+    else if (input === ' ' || key.return) toggle(track, step);
     else if (input === 'p') run('play');
     else if (input === '+' || input === '=') run('bpmUp');
     else if (input === '-') run('bpmDown');
@@ -212,209 +210,73 @@ export function App({ node, logs, audio, audioOff, port, clearScreen }: AppProps
     else if (input === 'd') run('delete');
     else if ((input === '<' || input === '>') && audio) {
       audio.setVolume(audio.volume + (input === '>' ? 0.1 : -0.1));
-      rerender();
+      redraw();
     } else if (input === 'q' || key.escape) run('quit');
+  };
+
+  useInput((input, key) => {
+    const mode = ui.mode;
+    if (mode.kind === 'confirmDelete') answerDelete(mode.trackKey, input);
+    else if (mode.kind === 'filePath') typePath(mode.path, input, key);
+    else if (mode.kind === 'pickSound') pickSound(input);
+    else gridKey(input, key);
   });
 
-  const reachable = node.myAddress ?? localAddresses().find((a) => !a.startsWith('127.')) ?? '127.0.0.1';
-  const sync = node.sync();
-  const order = { me: 0, alive: 1, gone: 2, 'not heard from': 3 };
+  // --- Layout ---
+
+  const { state, steps, tracks, playing, controls } = current();
+
   const members = node
     .members()
-    .filter((m) => m.status !== 'not heard from' && !(m.status === 'gone' && (m.goneForMs ?? 0) > GONE_SHOWN_MS))
-    .sort((a, b) => order[a.status] - order[b.status] || a.name.localeCompare(b.name));
-  const label = labels(members);
-  // Ink can only redraw in place while the whole UI fits in the terminal, so the parts below the
-  // grid get the space that is left: the log shrinks and disappears first, then the member list
-  // (down to this node plus an "… and N more" line), and anything else is clipped at the bottom.
-  const top = PAD + TRACKS_ROW + Math.max(1, tracks.length) + 1 + 3; // through the grid, playhead row and help
-  const memberRoom = rows - 1 - top - PAD - 4; // 4: blank, "Members", clock, audio
-  let showCount = Math.min(members.length, MAX_MEMBERS_SHOWN, Math.max(1, memberRoom));
-  if (showCount < members.length) showCount = Math.max(1, Math.min(showCount, memberRoom - 1)); // room for "… and N more"
-  const shownMembers = members.slice(0, showCount);
-  const moreMembers = members.length - shownMembers.length;
-  const linesAboveLog = top + 2 + shownMembers.length + (moreMembers > 0 ? 1 : 0) + 2;
-  const logRoom = Math.min(LOG_LINES, rows - 1 - linesAboveLog - 2 - PAD); // 2: blank line and "Log" title
-  const shownLog = logRoom > 0 ? logs.lines.slice(-logRoom) : [];
-
-  // Too short even for the grid and one member line: drawing anyway would scroll and garble the
-  // terminal, so ask for a taller window instead (the grid comes back as soon as it fits).
-  const needed = linesAboveLog + PAD + 1;
-  tooSmall.current = rows < needed;
-  if (tooSmall.current) {
+    .filter(
+      (member) =>
+        member.status !== 'not heard from' && !(member.status === 'gone' && (member.goneForMs ?? 0) > GONE_SHOWN_MS),
+    )
+    .sort((a, b) => MEMBER_ORDER[a.status] - MEMBER_ORDER[b.status] || a.name.localeCompare(b.name));
+  const fit = fitToHeight(rows, tracks.length, members.length);
+  tooSmall.current = fit.tooSmall;
+  if (fit.tooSmall) {
     return (
       <Box padding={PAD}>
         <Text color="yellow" wrap="truncate-end">
-          The window is too short for Lö-Fi: make it at least {needed} rows tall (now {rows}).
+          The window is too short for Lö-Fi: make it at least {fit.needed} rows tall (now {rows}).
         </Text>
       </Box>
     );
   }
 
+  const reachable = node.myAddress ?? localAddresses().find((address) => !address.startsWith('127.')) ?? '127.0.0.1';
+  const presetsInUse = new Set(PRESETS.filter((preset) => tracks.some(([trackKey]) => trackKey === presetKey(preset))));
+  const mode = ui.mode;
+  const prompt: PromptState =
+    mode.kind === 'confirmDelete'
+      ? { kind: 'confirmDelete', trackName: state.tracks[mode.trackKey]?.name.value ?? '?' }
+      : mode.kind === 'filePath'
+        ? { kind: 'filePath', path: mode.path }
+        : mode.kind === 'pickSound'
+          ? { kind: 'pickSound', presetsInUse }
+          : { kind: 'help' };
+
   return (
     <Box flexDirection="column" padding={PAD} height={rows - 1} overflow="hidden">
-      {BANNER.map((line, i) => (
-        <Text key={i} color={BANNER_COLORS[i]} wrap="truncate-end">
-          {line}
-        </Text>
-      ))}
-      <Text bold wrap="truncate-end">
-        Lö-Fi · {node.opts.name} · others join with --join {reachable}:{port}
-      </Text>
-      <Box marginTop={1} flexDirection="column">
-        {controls.map((row, r) => (
-          <Box key={r} marginTop={r > 0 ? CONTROL_ROW_STEP - 1 : 0}>
-            {row.map((seg, i) => (
-              <Text key={i} inverse={!!seg.action} color={seg.color}>
-                {seg.text}
-              </Text>
-            ))}
-          </Box>
-        ))}
-      </Box>
-      <Box marginTop={1}>
-        <Box width={LABEL_WIDTH} />
-        <StepRow
-          steps={steps}
-          cell={(s) => <Text dimColor>{s % 4 === 0 ? String(s + 1).padEnd(CELL_WIDTH) : '   '}</Text>}
-        />
-      </Box>
-      {tracks.length === 0 && <Text dimColor>(no tracks yet: press a or click Add track)</Text>}
-      {tracks.map(([hash, t], i) => {
-        const muted = t.status.value === 'muted';
-        return (
-          <Box key={hash}>
-            <Box width={LABEL_WIDTH}>
-              <Text bold={i === cur.track} dimColor={muted} wrap="truncate-end">
-                {t.name.value.slice(0, 9).padEnd(9)}
-                {muted ? 'M' : node.hasSound(hash) ? ' ' : '↓'}
-              </Text>
-            </Box>
-            <StepRow
-              steps={steps}
-              cell={(s) => {
-                const on = t.cells[s].value;
-                const color = playing && playhead === s ? 'yellow' : on ? (muted ? 'gray' : 'green') : 'gray';
-                return (
-                  <Text inverse={i === cur.track && s === cur.step} color={color}>
-                    {on ? '[■]' : '[ ]'}
-                  </Text>
-                );
-              }}
-            />
-          </Box>
-        );
-      })}
-      <Box>
-        <Box width={LABEL_WIDTH} />
-        <StepRow steps={steps} cell={(s) => <Text color="yellow">{playing && playhead === s ? ' ▲ ' : '   '}</Text>} />
-      </Box>
-
-      <Box marginTop={1} flexDirection="column" height={2}>
-        {deleting !== null ? (
-          <Text>
-            Delete track <Text color="red">{state.tracks[deleting]?.name.value}</Text>? <Text dimColor>(y/n)</Text>
-          </Text>
-        ) : filePath !== null ? (
-          <Box flexDirection="column">
-            <Box>
-              <Text>Sample file: </Text>
-              {/* a long path loses its start, so the end being typed stays visible */}
-              <Text wrap="truncate-start" color="cyan">
-                {filePath}
-              </Text>
-              <Text inverse> </Text>
-            </Box>
-            <Text dimColor>any audio file up to 5 MB · Enter adds · Esc cancels</Text>
-          </Box>
-        ) : adding ? (
-          <Text wrap="truncate-end">
-            Add a sound:{' '}
-            {PRESETS.map((p, i) => {
-              const k = presetKey(p);
-              const present = Object.hasOwn(state.tracks, k) && state.tracks[k].status.value !== 'deleted';
-              return (
-                <Text key={p}>
-                  <Text color="yellow" bold>
-                    {i + 1}
-                  </Text>{' '}
-                  <Text dimColor={present}>{p}</Text>
-                  {'  '}
-                </Text>
-              );
-            })}
-            <Text color="yellow" bold>
-              f
-            </Text>{' '}
-            file…{'  '}
-            <Text dimColor>(any other key cancels)</Text>
-          </Text>
-        ) : (
-          <>
-            <HelpLine
-              items={[
-                ['click', 'cells and buttons'],
-                ['arrows', 'move'],
-                ['space', 'toggle'],
-                ['m', 'mute'],
-                ['d', 'delete'],
-              ]}
-            />
-            <HelpLine
-              items={[
-                ['p', 'play/stop'],
-                ['+/-', 'tempo'],
-                ['[ ]', 'steps'],
-                ['a', 'add track'],
-                ['< >', 'volume'],
-                ['q', 'quit'],
-              ]}
-            />
-          </>
-        )}
-      </Box>
-
-      <Box marginTop={1} flexDirection="column">
-        <Text bold>Members</Text>
-        {shownMembers.map((m) => (
-          <Text key={m.id} wrap="truncate-end">
-            <Text color={m.status === 'gone' ? 'red' : 'green'}>{m.status === 'gone' ? '○' : '●'}</Text>{' '}
-            {label.get(m.id)} <Text dimColor>{m.status === 'me' ? '(me)' : m.status === 'gone' ? '(gone)' : ''}</Text>
-            {m.id === sync.reference && <Text color="yellow"> time reference</Text>}
-          </Text>
-        ))}
-        {moreMembers > 0 && (
-          <Text dimColor>
-            … and {moreMembers} more ({members.slice(showCount).filter((m) => m.status === 'alive').length} alive)
-          </Text>
-        )}
-        <Text dimColor wrap="truncate-end">
-          {sync.iAmReference
-            ? 'Clock: this node is the time reference'
-            : sync.reference === null
-              ? 'Clock: no time reference yet'
-              : `Clock: ${sync.synced ? 'synced' : 'syncing'} to ${sync.referenceName}, offset ${sync.offsetMs.toFixed(1)} ms` +
-                (sync.delayMs === null ? '' : `, round trip ${sync.delayMs.toFixed(1)} ms`)}
-        </Text>
-        <Text dimColor wrap="truncate-end">
-          {audio
-            ? `Audio: on, volume ${Math.round(audio.volume * 100)}%, output latency ${audio.latencyMs.toFixed(0)} ms (corrected for)`
-            : `Audio: off (${audioOff})`}
-        </Text>
-      </Box>
-
-      {shownLog.length > 0 && (
-        <Box marginTop={1} flexDirection="column">
-          <Text bold wrap="truncate-end">
-            Log <Text dimColor>({logs.path})</Text>
-          </Text>
-          {shownLog.map((l, i) => (
-            <Text key={i} dimColor wrap="truncate-end">
-              {l}
-            </Text>
-          ))}
-        </Box>
-      )}
+      <Header title={`Lö-Fi · ${node.opts.name} · others join with --join ${reachable}:${port}`} controls={controls} />
+      <Grid
+        tracks={tracks}
+        steps={steps}
+        cursor={ui.cursor}
+        playing={playing}
+        playhead={playhead}
+        hasSound={(trackKey) => node.hasSound(trackKey)}
+      />
+      <Prompt prompt={prompt} />
+      <MembersPanel
+        shown={members.slice(0, fit.members)}
+        hidden={members.slice(fit.members)}
+        sync={node.sync()}
+        audio={audio}
+        audioOff={audioOff}
+      />
+      <LogPanel entries={fit.logLines > 0 ? logs.entries.slice(-fit.logLines) : []} path={logs.path} />
     </Box>
   );
 }

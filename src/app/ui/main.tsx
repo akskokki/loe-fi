@@ -13,7 +13,8 @@ import { parseArgs } from 'node:util';
 import { render } from 'ink';
 import type { AudioEngine } from '../../audio/engine.js';
 import { COMMON_OPTIONS, nodeFromArgs, startAudio, startOrExit } from '../cli.js';
-import { App, LOG_LINES } from './App.js';
+import { App } from './App.js';
+import { LOG_LINES } from './fit.js';
 import { LogBuffer } from './log.js';
 
 const { values: args } = parseArgs({
