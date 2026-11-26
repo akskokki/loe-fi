@@ -3,40 +3,32 @@
 //
 // Protocol (see messages.ts): a joining node sends JOIN to one member, which answers with STATE.
 // Every node sends its whole state to all live members after each local change and once a second.
-// Each send bumps the version of the node's own member entry, which is its heartbeat. A member
-// whose heartbeat has not increased for PEER_TIMEOUT_MS is considered gone.
+// Each send bumps the version of the node's own member entry, which is its heartbeat; membership.ts
+// decides from those who is alive. This class wires the parts together: the UDP socket, joining,
+// the time reference election and clock sync (sync/), and sample files (samples/).
 import dgram from 'node:dgram';
 import dns from 'node:dns/promises';
 import { EventEmitter } from 'node:events';
 import os from 'node:os';
-import type { Address, Msg } from './messages.js';
+import type net from 'node:net';
+import { wellFormed, type Address, type Msg } from './messages.js';
+import { Membership, type MemberView } from './membership.js';
 import { addTrack, emptyState, heartbeat, memberName, merge, type NodeId, type State } from '../state/state.js';
-import { MAX_NAME_LENGTH, isState, isValidName } from '../state/validate.js';
+import { MAX_NAME_LENGTH, isValidName } from '../state/validate.js';
 import { describeChanges } from '../state/describe.js';
 import { Clock } from '../sync/clock.js';
 import { Election } from '../sync/election.js';
 import { SampleStore } from '../samples/store.js';
-import { fetchSample, serveSamples } from '../samples/transfer.js';
+import { SampleFetcher } from '../samples/fetcher.js';
+import { serveSamples } from '../samples/transfer.js';
 import { sampleKey, soundOf } from '../samples/keys.js';
-import type net from 'node:net';
+
+export type { MemberStatus, MemberView } from './membership.js';
 
 const SEND_INTERVAL_MS = 1000;
-const PEER_TIMEOUT_MS = 5000;
+const RETRY_GONE_EVERY = 5; // also send to gone members on every 5th tick, so a healed network split reconnects
 const SYNC_EVERY_MS = 1000; // clock sync requests to the reference; faster until the first few samples
 const SYNC_FAST_MS = 250;
-const RETRY_GONE_EVERY = 5;
-const MAX_DOWNLOADS = 2; // samples fetched at the same time
-const RETRY_HOLDER_MS = 10_000; // after a failed fetch, ask other holders before this one again
-const RETRY_BUSY_MS = 1000; // ... but a holder that was only busy uploading can be asked again soon // also send to gone members on every 5th tick, so a healed network split reconnects
-
-export type MemberStatus = 'me' | 'alive' | 'gone' | 'not heard from';
-export type MemberView = {
-  id: NodeId; name: string; address: string | null; port: number; heartbeat: number; status: MemberStatus;
-  /** For live members: how long ago their heartbeat last increased. */
-  seenMsAgo?: number;
-  /** For gone members: how long ago they timed out. */
-  goneForMs?: number;
-};
 
 export type NodeOptions = {
   /** Display name shown to the other members. Must pass isValidName(). */
@@ -83,21 +75,6 @@ export function localAddresses(): string[] {
 
 const isLoopback = (a: string) => a.startsWith('127.') || a === 'localhost';
 
-/** Shape check, so a packet from an older version of this program is reported instead of crashing us or spreading. */
-function wellFormed(m: any): m is Msg {
-  if (typeof m !== 'object' || m === null || typeof m.from !== 'number') return false;
-  const num = (x: unknown) => typeof x === 'number' && Number.isFinite(x);
-  const hasTo = typeof m.to?.address === 'string' && Number.isInteger(m.to.port);
-  switch (m.type) {
-    case 'JOIN': return hasTo;
-    case 'STATE': return hasTo && isState(m.state);
-    case 'ELECTION': case 'ANSWER': case 'COORDINATOR': return true;
-    case 'TIME_REQUEST': return num(m.t0);
-    case 'TIME_REPLY': return num(m.t0) && num(m.t1) && num(m.t2);
-    default: return false;
-  }
-}
-
 export type SyncView = {
   /** Node ID of the time reference, or null while there is none. */
   reference: NodeId | null;
@@ -115,57 +92,60 @@ export type SyncView = {
 export class PeerNode extends EventEmitter<{ change: [] }> {
   readonly id: NodeId = Math.floor(Math.random() * 2 ** 32);
   state: State = emptyState();
-  /** This node's address as others see it, learned from the `to` field of incoming STATE messages. */
+  /** This node's address as others see it, learned from the `to` field of incoming messages. */
   myAddress: string | null = null;
-
-  private sock = dgram.createSocket('udp4');
-  /** Where packets from each node actually came from. Preferred over the address in its member entry. */
-  private observed = new Map<NodeId, Address>();
-  /** When each member's heartbeat last increased, decided locally. */
-  private liveness = new Map<NodeId, { ver: number; changedAt: number; alive: boolean; everAlive: boolean; goneAt?: number }>();
-  /** Until this time, drop all packets in both directions (for testing failures). */
-  private offlineUntil = 0;
-  private timer: ReturnType<typeof setInterval> | undefined;
-  /** The --join address, resolved, and whether it has answered yet. */
-  private joinTarget: Address | undefined;
-  private joined = false;
   /** Packet counts since start. `dropped` counts packets thrown away by the `drop` option. */
   readonly stats = { sent: 0, received: 0, dropped: 0 };
   readonly clock: Clock;
   readonly store: SampleStore;
-  private sampleServer: net.Server | undefined;
-  /** Samples being fetched, and per sample the holders that failed and when they may be asked again. */
-  private downloading = new Set<string>();
-  private failedHolders = new Map<string, Map<NodeId, number>>();
+
+  private sock = dgram.createSocket('udp4');
+  private membership: Membership;
   private election: Election;
+  private fetcher: SampleFetcher;
+  private sampleServer: net.Server | undefined;
+  /** The --join address, resolved, and whether it has answered yet. */
+  private joinTarget: Address | undefined;
+  private joined = false;
+  /** Until this time, drop all packets in both directions (for testing failures). */
+  private offlineUntil = 0;
+  private timer: ReturnType<typeof setInterval> | undefined;
   private syncTimer: ReturnType<typeof setInterval> | undefined;
   private lastSyncRequest = 0;
   private stopped = false;
 
   constructor(readonly opts: NodeOptions) {
     super();
+    const log = (line: string) => this.opts.log(line);
     this.sock.on('message', (buf, rinfo) => this.receive(buf, rinfo));
     this.clock = new Clock(opts.clockSkewMs ?? 0);
     this.store = new SampleStore(opts.sampleDir ?? 'samples');
+    this.membership = new Membership(this.id, log);
     this.election = new Election({
       me: this.id,
-      liveMembers: () => this.liveMembers(),
+      liveMembers: () => this.membership.live(),
       send: (to, type) => this.sendTo(to, { type, from: this.id }),
       // May take over unless a live reference exists that we have not synced to yet.
       canLead: () => {
         const ref = this.election.reference;
-        return ref === null || ref === this.id || this.clock.synced || !this.liveMembers().includes(ref);
+        return ref === null || ref === this.id || this.clock.synced || !this.membership.live().includes(ref);
       },
-      log: (line) => this.log(line),
+      log,
       nameOf: (id) => `${memberName(this.state, id)} (${id})`,
       onChange: () => {
         this.clock.resetSamples(); // samples from the old reference no longer apply
         this.emit('change');
       },
     });
+    this.fetcher = new SampleFetcher(this.store, {
+      liveMembers: () => this.membership.live(),
+      addressOf: (id) => this.membership.addressOf(this.state, id),
+      log,
+      onFetched: () => this.emit('change'),
+    });
   }
 
-  /** Session time in ms: this machine's clock corrected to the time reference's (see clock.ts). */
+  /** Session time in ms: this machine's clock corrected to the time reference's (see sync/clock.ts). */
   now(): number {
     return this.clock.now();
   }
@@ -182,7 +162,11 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
     };
   }
 
-  /** Bind the socket and start the heartbeat. Rejects if the port is taken or the join host is unknown. */
+  members(): MemberView[] {
+    return this.membership.view(this.state);
+  }
+
+  /** Bind the sockets and start the heartbeat. Rejects if the port is taken or the join host is unknown. */
   async start(): Promise<void> {
     if (this.opts.join) {
       // Resolve a host name once, so replies from it can be recognised by their address.
@@ -190,21 +174,21 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
       this.joinTarget = { address, port: this.opts.join.port };
     }
     // Sample transfers use TCP on the same port number as the UDP messages.
-    this.sampleServer = await serveSamples(this.store, this.opts.port, (line) => this.log(line));
+    this.sampleServer = await serveSamples(this.store, this.opts.port, (line) => this.opts.log(line));
     return new Promise((resolve, reject) => {
       this.sock.once('error', reject);
       this.sock.bind(this.opts.port, '0.0.0.0', () => {
         this.sock.off('error', reject);
-        this.sock.on('error', (err) => this.log(`socket error: ${err.message}`));
+        this.sock.on('error', (err) => this.opts.log(`socket error: ${err.message}`));
         this.state = heartbeat(this.state, this.id, this.memberInfo());
         this.sendJoin();
         let tick = 0;
         this.timer = setInterval(() => {
-          this.updateLiveness(Date.now());
+          this.updateLiveness();
           this.sendJoin();
           this.broadcast(++tick % RETRY_GONE_EVERY === 0);
           this.election.tick();
-          this.fetchMissing();
+          this.fetcher.fetchMissing(this.state);
         }, SEND_INTERVAL_MS);
         this.syncTimer = setInterval(() => this.requestTime(), SYNC_FAST_MS);
         resolve();
@@ -224,15 +208,15 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
 
   /**
    * Make a local change with one of the edit functions from state.ts, e.g.
-   * `node.edit((s, me) => toggleCell(s, me, 'kick', 0))`. Logs and sends the change right away.
-   * Returns the change descriptions; empty if nothing changed.
+   * `node.edit((s, me) => toggleCell(s, me, 'preset:kick', 0))`. Logs and sends the change right
+   * away. Returns the change descriptions; empty if nothing changed.
    */
   edit(change: (s: State, me: NodeId) => State): string[] {
     const before = this.state;
     this.state = change(this.state, this.id);
     const changes = describeChanges(before, this.state);
     if (changes.length === 0) return changes;
-    for (const line of changes) this.log(`-> ${line}`);
+    for (const line of changes) this.opts.log(`-> ${line}`);
     this.broadcast();
     this.emit('change');
     return changes;
@@ -240,45 +224,16 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
 
   goOffline(seconds: number) {
     this.offlineUntil = Date.now() + seconds * 1000;
-    this.log(`offline for ${seconds} s`);
-    setTimeout(() => this.log('back online'), seconds * 1000);
+    this.opts.log(`offline for ${seconds} s`);
+    setTimeout(() => this.opts.log('back online'), seconds * 1000);
   }
-
-  members(): MemberView[] {
-    const now = Date.now();
-    return Object.entries(this.state.members).map(([key, entry]) => {
-      const id = Number(key);
-      const l = this.liveness.get(id);
-      const status: MemberStatus = id === this.id ? 'me' : l?.alive ? 'alive' : l?.everAlive ? 'gone' : 'not heard from';
-      return {
-        id, name: entry.value.name, address: entry.value.address, port: entry.value.port, heartbeat: entry.stamp.ver, status,
-        seenMsAgo: l && status === 'alive' ? now - l.changedAt : undefined,
-        goneForMs: l?.goneAt !== undefined && status === 'gone' ? now - l.goneAt : undefined,
-      };
-    });
-  }
-
-  private log(line: string) {
-    this.opts.log(line);
-  }
-
-  private offline() {
-    return Date.now() < this.offlineUntil;
-  }
-
-  private memberInfo() {
-    return { name: this.opts.name, address: this.myAddress, port: this.opts.port, samples: this.store.list() };
-  }
-
-  // --- Samples ---
 
   /**
    * Store a sample file's bytes and add a track for it, named `name` (e.g. the file name). The
    * caller checks that the bytes are audio. Returns the track key; throws if the file is too big.
    */
   addSample(bytes: Uint8Array, name: string): string {
-    const hash = this.store.put(bytes);
-    const key = sampleKey(hash);
+    const key = sampleKey(this.store.put(bytes));
     this.edit((s, me) => addTrack(s, me, key, name));
     return key;
   }
@@ -289,66 +244,51 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
     return sound?.kind === 'preset' || (sound?.kind === 'sample' && this.store.has(sound.hash));
   }
 
-  /** Pull samples of tracks that aren't deleted and that we don't have from members that list them. */
-  private fetchMissing() {
-    const now = Date.now();
-    for (const [key, track] of Object.entries(this.state.tracks)) {
-      const sound = soundOf(key);
-      if (track.status.value === 'deleted' || sound?.kind !== 'sample') continue;
-      const { hash } = sound;
-      if (this.store.has(hash) || this.downloading.has(hash) || this.downloading.size >= MAX_DOWNLOADS) continue;
-      const failed = this.failedHolders.get(hash) ?? new Map<NodeId, number>();
-      const holders = this.liveMembers().filter((id) =>
-        Object.hasOwn(this.state.members, id) && this.state.members[id].value.samples.includes(hash)
-        && now >= (failed.get(id) ?? 0));
-      if (holders.length === 0) continue; // nobody has it, or all holders failed recently: try again later
-      const holder = holders[Math.floor(Math.random() * holders.length)]; // spreads the uploads
-      const addr = this.addressOf(holder);
-      if (!addr) continue;
-      const what = `sample ${track.name.value} (${hash.slice(0, 12)}…)`;
-      const who = memberName(this.state, holder);
-      this.downloading.add(hash);
-      this.log(`<- fetching ${what} from ${who}`);
-      fetchSample(addr.address, addr.port, hash)
-        .then((bytes) => {
-          this.store.put(bytes, hash); // throws if the bytes don't match the hash
-          this.log(`<- got ${what} from ${who}, ${bytes.length} bytes`);
-          this.emit('change');
-        })
-        .catch((err: Error) => {
-          failed.set(holder, Date.now() + (err.message === 'busy' ? RETRY_BUSY_MS : RETRY_HOLDER_MS));
-          this.failedHolders.set(hash, failed);
-          this.log(`fetching ${what} from ${who} failed: ${err.message}; will ask another member`);
-        })
-        .finally(() => this.downloading.delete(hash));
-    }
+  private memberInfo() {
+    return { name: this.opts.name, address: this.myAddress, port: this.opts.port, samples: this.store.list() };
+  }
+
+  private updateLiveness(heardFrom?: NodeId) {
+    if (this.membership.update(this.state, Date.now(), heardFrom)) this.emit('change');
   }
 
   // --- Sending ---
 
   private send(msg: Msg, to: Address) {
-    if (this.offline()) return;
+    if (Date.now() < this.offlineUntil) return;
     const data = JSON.stringify(msg);
-    if (this.opts.verbose) this.log(`-> ${msg.type} to ${to.address}:${to.port} (${data.length} bytes)`);
+    if (this.opts.verbose) this.opts.log(`-> ${msg.type} to ${to.address}:${to.port} (${data.length} bytes)`);
     this.stats.sent++;
     this.sock.send(data, to.port, to.address, (err) => {
-      if (err) this.log(`send to ${to.address}:${to.port} failed: ${err.message}`);
+      if (err) this.opts.log(`send to ${to.address}:${to.port} failed: ${err.message}`);
     });
   }
 
-  /** Send to a member by node ID, at the address its packets come from or else the one in its entry. */
+  /** Send to a member by node ID. */
   private sendTo(id: NodeId, msg: Msg) {
-    const addr = this.addressOf(id);
+    const addr = this.membership.addressOf(this.state, id);
     if (addr) this.send(msg, addr);
   }
 
-  private addressOf(id: NodeId): Address | null {
-    const entry = Object.hasOwn(this.state.members, id) ? this.state.members[id] : undefined;
-    return this.observed.get(id) ?? (entry?.value.address ? { address: entry.value.address, port: entry.value.port } : null);
+  private sendState(to: Address) {
+    this.send({ type: 'STATE', from: this.id, to, state: this.state }, to);
   }
 
-  private liveMembers(): NodeId[] {
-    return [...this.liveness].filter(([, l]) => l.alive).map(([id]) => id);
+  // Keep sending JOIN until the node we join has answered, in case it starts later or a packet is lost.
+  // Other live members don't count: they may have joined through us before we reached the session.
+  private sendJoin() {
+    const target = this.joinTarget;
+    if (!target || this.joined) return;
+    this.opts.log(`-> JOIN to ${target.address}:${target.port}`);
+    this.send({ type: 'JOIN', from: this.id, to: target }, target);
+  }
+
+  /** Bump our heartbeat and send the state to everyone; to the join target while we know nobody else. */
+  private broadcast(includeGone = false) {
+    this.state = heartbeat(this.state, this.id, this.memberInfo());
+    const targets = this.membership.targets(this.state, includeGone);
+    if (targets.length === 0 && this.joinTarget) targets.push(this.joinTarget);
+    for (const to of targets) this.sendState(to);
   }
 
   /** Ask the reference for the time: every SYNC_EVERY_MS, or every SYNC_FAST_MS until synced. */
@@ -361,46 +301,10 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
     this.sendTo(ref, { type: 'TIME_REQUEST', from: this.id, t0: this.clock.local() });
   }
 
-  private sendState(to: Address) {
-    this.send({ type: 'STATE', from: this.id, to, state: this.state }, to);
-  }
-
-  // Keep sending JOIN until the node we join has answered, in case it starts later or a packet is lost.
-  // Other live members don't count: they may have joined through us before we reached the session.
-  private sendJoin() {
-    const target = this.joinTarget;
-    if (!target || this.joined) return;
-    this.log(`-> JOIN to ${target.address}:${target.port}`);
-    this.send({ type: 'JOIN', from: this.id, to: target }, target);
-  }
-
-  /** Addresses of the live and just-learned members (and the gone ones too if asked), plus the join target until we know any member. */
-  private targets(includeGone: boolean): Address[] {
-    const out = new Map<string, Address>();
-    for (const key of Object.keys(this.state.members)) {
-      const id = Number(key);
-      const l = this.liveness.get(id);
-      // A member we only just learned about from someone else gets our STATE for a few seconds, so
-      // it can answer directly instead of us waiting for its heartbeat to move in gossip.
-      const justLearned = l !== undefined && !l.everAlive && Date.now() - l.changedAt < PEER_TIMEOUT_MS;
-      if (id === this.id || !(includeGone || l?.alive || justLearned)) continue;
-      const addr = this.addressOf(id);
-      if (addr) out.set(`${addr.address}:${addr.port}`, addr);
-    }
-    if (out.size === 0 && this.joinTarget) out.set('join', this.joinTarget);
-    return [...out.values()];
-  }
-
-  /** Bump our heartbeat and send the state to everyone. */
-  private broadcast(includeGone = false) {
-    this.state = heartbeat(this.state, this.id, this.memberInfo());
-    for (const to of this.targets(includeGone)) this.sendState(to);
-  }
-
   // --- Receiving ---
 
   private receive(buf: Buffer, rinfo: dgram.RemoteInfo) {
-    if (this.offline()) return;
+    if (Date.now() < this.offlineUntil) return;
     if (this.opts.drop && Math.random() < this.opts.drop) {
       this.stats.dropped++;
       return;
@@ -411,42 +315,43 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
     try {
       msg = JSON.parse(buf.toString());
     } catch {
-      this.log(`ignored a non-JSON packet from ${where}`);
+      this.opts.log(`ignored a non-JSON packet from ${where}`);
       return;
     }
     if (!wellFormed(msg)) {
-      this.log(`ignored a message in an unknown format from ${where} (is it running an older version? git pull there)`);
+      this.opts.log(`ignored a message in an unknown format from ${where} (is it running an older version? git pull there)`);
       return;
     }
     try {
       this.handle(msg, { address: rinfo.address, port: rinfo.port }, buf.length);
     } catch (err) {
-      this.log(`error handling ${msg.type} from ${msg.from} (${where}): ${(err as Error).stack}`);
+      this.opts.log(`error handling ${msg.type} from ${msg.from} (${where}): ${(err as Error).stack}`);
     }
   }
 
   private handle(msg: Msg, from: Address, bytes: number) {
     if (msg.from === this.id) return;
-    this.observed.set(msg.from, from);
+    this.membership.observe(msg.from, from);
+    const log = this.opts.log;
 
     if (msg.type === 'JOIN') {
-      this.log(`<- JOIN from ${msg.from} (${from.address}:${from.port})`);
+      log(`<- JOIN from ${msg.from} (${from.address}:${from.port})`);
       this.learnAddress(msg.to);
       this.sendState(from);
     } else if (msg.type === 'STATE') {
-      if (this.opts.verbose) this.log(`<- STATE from ${msg.from} (${from.address}:${from.port}, ${bytes} bytes)`);
+      if (this.opts.verbose) log(`<- STATE from ${msg.from} (${from.address}:${from.port}, ${bytes} bytes)`);
       if (!this.joined && this.joinTarget?.address === from.address && this.joinTarget.port === from.port) this.joined = true;
       this.learnAddress(msg.to);
       const before = this.state;
       this.state = merge(this.state, msg.state);
       const changes = describeChanges(before, this.state);
-      for (const line of changes) this.log(`<- ${line}`);
+      for (const line of changes) log(`<- ${line}`);
       if (changes.length > 0) this.emit('change');
-      this.updateLiveness(Date.now(), msg.from);
-      if (changes.length > 0) this.fetchMissing();
+      this.updateLiveness(msg.from);
+      if (changes.length > 0) this.fetcher.fetchMissing(this.state);
     } else if (msg.type === 'ELECTION' || msg.type === 'ANSWER' || msg.type === 'COORDINATOR') {
       const repeat = msg.type === 'COORDINATOR' && msg.from === this.election.reference; // re-sent every few seconds
-      if (!repeat || this.opts.verbose) this.log(`<- ${msg.type} from ${memberName(this.state, msg.from)} (${msg.from})`);
+      if (!repeat || this.opts.verbose) log(`<- ${msg.type} from ${memberName(this.state, msg.from)} (${msg.from})`);
       this.election.receive(msg.type, msg.from);
     } else if (msg.type === 'TIME_REQUEST') {
       const t1 = this.now();
@@ -455,54 +360,19 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
       if (msg.from !== this.election.reference) return; // a late reply from a previous reference
       const wasSynced = this.clock.synced;
       const sample = this.clock.addSample(msg.t0, msg.t1, msg.t2, this.clock.local());
-      if (this.opts.verbose) this.log(`<- TIME_REPLY offset ${sample.offset.toFixed(2)} ms, delay ${sample.delay.toFixed(2)} ms`);
+      if (this.opts.verbose) log(`<- TIME_REPLY offset ${sample.offset.toFixed(2)} ms, delay ${sample.delay.toFixed(2)} ms`);
       if (!wasSynced && this.clock.synced) {
-        this.log(`clock synced to ${memberName(this.state, msg.from)}: offset ${this.clock.offset.toFixed(1)} ms, delay ${this.clock.delay?.toFixed(1)} ms`);
+        log(`clock synced to ${memberName(this.state, msg.from)}: offset ${this.clock.offset.toFixed(1)} ms, delay ${this.clock.delay?.toFixed(1)} ms`);
         this.emit('change');
       }
     }
   }
 
-  /** Take our address from a STATE, but don't let a loopback address replace a real one. */
+  /** Take our address from a message's `to`, but don't let a loopback address replace a real one. */
   private learnAddress(to: Address) {
     if (to.address === this.myAddress || (this.myAddress && !isLoopback(this.myAddress) && isLoopback(to.address))) return;
-    this.log(`others reach me at ${to.address}:${this.opts.port}`);
+    this.opts.log(`others reach me at ${to.address}:${this.opts.port}`);
     this.myAddress = to.address;
     this.state = heartbeat(this.state, this.id, this.memberInfo()); // so the next message carries it
-  }
-
-  /** `heardFrom` is a node whose STATE just arrived directly: that alone proves it is alive. */
-  private updateLiveness(now: number, heardFrom?: NodeId) {
-    let changed = false;
-    for (const [key, entry] of Object.entries(this.state.members)) {
-      const id = Number(key);
-      if (id === this.id) continue;
-      const ver = entry.stamp.ver;
-      const known = this.liveness.get(id);
-      const where = `${memberName(this.state, id)} (${id}, ${entry.value.address ?? '?'}:${entry.value.port})`;
-      if (id === heardFrom && !(known?.alive && ver <= known.ver)) {
-        if (!known?.alive) {
-          this.log(`+ member ${where}${known?.everAlive ? ' is back' : ''}`);
-          changed = true;
-        }
-        this.liveness.set(id, { ver, changedAt: now, alive: true, everAlive: true });
-      } else if (!known) {
-        // Seeing an entry proves nothing: member entries are never removed, so this may be a peer
-        // that quit long ago, e.g. our own previous run on this machine. Wait for its heartbeat to move.
-        this.liveness.set(id, { ver, changedAt: now, alive: false, everAlive: false });
-      } else if (ver > known.ver) {
-        if (!known.alive) {
-          this.log(`+ member ${where}${known.everAlive ? ' is back' : ''}`);
-          changed = true;
-        }
-        this.liveness.set(id, { ver, changedAt: now, alive: true, everAlive: true });
-      } else if (known.alive && now - known.changedAt > PEER_TIMEOUT_MS) {
-        known.alive = false;
-        known.goneAt = now;
-        changed = true;
-        this.log(`- member ${where} timed out`);
-      }
-    }
-    if (changed) this.emit('change');
   }
 }
