@@ -2,6 +2,8 @@
 
 ## Commits
 
+Put tests in their own commit, separate from the code change they cover.
+
 Every commit must end with `Co-authored-by` trailers for all team members except the commit's author (check `git config user.name`). Put them after a blank line at the end of the message, one per line:
 
 ```
