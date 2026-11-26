@@ -8,15 +8,40 @@ Real-time multiplayer drum sequencer. Design: [docs/design-plan.tex](docs/design
 |---|---|
 | `src/state.ts` | The global state (every value has a version stamp), `merge()`, and the functions that change the state |
 | `src/messages.ts` | The JOIN and STATE messages |
-| `src/peer.ts` | Headless peer: keeps its state in sync with the other members over UDP and takes typed commands |
+| `src/node.ts` | A peer node: keeps its copy of the state in sync with the other members over UDP |
+| `src/ui.tsx` | Terminal UI with a live grid (`npm run ui`) |
+| `src/peer.ts` | Headless peer that takes typed commands (`npm run peer`), for VMs and scripted tests |
 | `src/describe.ts` | Log lines for what changed, and the grid as text |
 | `src/state.test.ts` | Tests for the merge rule (`npm test`) |
 
 `npm test` runs the tests, `npm run check` type-checks.
 
+## Terminal UI
+
+```bash
+npm run ui                                   # start a session
+npm run ui -- --join 192.168.1.10:7051       # join any member of a session
+```
+
+The UI and the headless peer can be in the same session. Setup on each machine is the same as below. The UI needs a terminal with mouse reporting (most Linux and macOS terminals) and at least about 75 columns for 16 steps, or 120 for 32. The log goes to `logs/<node id>.log`, and its last lines are shown at the bottom of the screen.
+
+| Mouse | Keyboard | Action |
+|---|---|---|
+| Click a cell | Arrows, then Space or Enter | Toggle a step |
+| Click a track name | Up and Down | Select a track |
+| Play / Stop | `p` | Start or stop playback |
+| BPM `-` `+` | `-` `+` | Tempo down or up by 5 |
+| Steps `-` `+` | `[` `]` | Fewer or more steps |
+| Add track | `a`, type a name, Enter (Esc cancels) | Add a track |
+| Mute | `m` | Mute or unmute the selected track |
+| Delete | `d` | Delete the selected track (adding the same name brings it back) |
+| Quit | `q` or Esc | Quit |
+
+There is no audio yet; the playhead only moves on screen.
+
 ## Headless peer
 
-There is no UI or audio yet. Every peer holds a copy of the session state and sends it to all live members after each change and once a second. Every peer merges what it receives using the version stamps. A peer that joins one member learns the others from the members in the state and connects to them too. A member whose heartbeat has not increased for 5 seconds is shown as gone.
+There is no audio yet. Every peer holds a copy of the session state and sends it to all live members after each change and once a second. Every peer merges what it receives using the version stamps. A peer that joins one member learns the others from the members in the state and connects to them too. A member whose heartbeat has not increased for 5 seconds is shown as gone.
 
 ### On every machine
 
