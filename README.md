@@ -16,6 +16,8 @@ Real-time multiplayer drum sequencer. Design: [docs/design-plan.tex](docs/design
 | `src/election.ts` | Bully election of the time reference |
 | `src/clock.ts` | Session time, synced to the time reference NTP-style |
 | `src/presets.ts` | The preset sounds (synthesized): kick, snare, hat, clap, tom |
+| `src/tracks.ts` | Track keys: `preset:<name>` or `sha256:<hash of a sample file>` |
+| `src/store.ts`, `src/transfer.ts`, `src/addfile.ts` | Sample files: stored by hash, pulled from other members over TCP, added from disk |
 | `src/schedule.ts`, `src/audio.ts` | Which steps sound when, and the audio engine that plays them in session time |
 | `src/harness.ts` | Convergence test over the network code (`npm run harness`) |
 
@@ -28,7 +30,7 @@ npm run harness                                              # 5 peers, 10 s of 
 npm run harness -- --peers 8 --seconds 20 --drop 0.5 --outage 6
 ```
 
-Starts several peers on this machine, each joining a random earlier peer and with its clock shifted by up to `--skew` ms (500 by default), and lets every peer make random edits (mostly toggling the same few cells, so edits conflict) while each throws away the given share of the packets it receives. With `--outage`, one peer goes offline for that many seconds in the middle. When the edits stop, the harness waits until every peer has the same state fingerprint, sees all the others alive, follows the highest node as time reference and has a session clock within 10 ms of the others; then it prints a table and exits with 0. With `--kill-reference` it then stops the time reference and checks that the others elect a new one and that session time doesn't jump. If that doesn't happen within 30 s, it prints FAILED and exits with 1. Every peer's log goes to `logs/harness-<time>.log`. `--seed` repeats the same edits; packet loss stays random.
+Starts several peers on this machine, each joining a random earlier peer and with its clock shifted by up to `--skew` ms (500 by default), and lets every peer make random edits (mostly toggling the same few cells, so edits conflict) while each throws away the given share of the packets it receives. With `--outage`, one peer goes offline for that many seconds in the middle. When the edits stop, the harness waits until every peer has the same state fingerprint, sees all the others alive, follows the highest node as time reference and has a session clock within 10 ms of the others; then it prints a table and exits with 0. With `--kill-reference` it then stops the time reference and checks that the others elect a new one and that session time doesn't jump. With `--samples N` (3 by default), random peers add generated WAV files during the run, and converging also requires every peer to have fetched every file. If that doesn't happen within 30 s, it prints FAILED and exits with 1. Every peer's log goes to `logs/harness-<time>.log`. `--seed` repeats the same edits; packet loss stays random.
 
 The headless peer and the UI also take `--drop 0.3`, and `show` prints the state fingerprint, so you can compare peers on different machines.
 
@@ -59,7 +61,7 @@ The UI and the headless peer can be in the same session. Setup on each machine i
 
 The UI plays the grid. Playback follows session time: the peers elect the one with the highest node ID as time reference (bully algorithm) and the others sync their clocks to it, so every machine plays the same step at the same moment. Each machine's audio output latency is measured and corrected for. The Members panel shows the reference, this peer's clock offset and the audio status; `show` in the headless peer prints the clock part.
 
-The sounds are presets that come with the program (synthesized, no sample files), so nothing is sent between peers but the grid. Start with `--no-audio` to run silently.
+Sounds are either presets that come with the program (synthesized, so every peer has them) or your own sample files: Add track (`a`), then `f`, then the file's path. Any audio file up to 5 MB works (WAV, MP3, OGG, FLAC). It is stored under its SHA-256 hash in `samples/`, and the other peers fetch it from a member that has it over TCP and check it against the hash. A track whose file hasn't arrived yet shows `↓` after its name and stays silent until it has. Start with `--no-audio` to run silently. To run several peers on one machine, give each its own folder with `--samples <folder>`, or they share one and never need to fetch anything.
 
 **Linux:** `node-web-audio-api` uses JACK. On a distro running PipeWire, install its JACK layer (`sudo apt install pipewire-jack`; Fedora usually has it). If audio still fails with `libjack.so.0: cannot open shared object file`, start through the wrapper: `pw-jack npm run ui`. The UI says `Audio: off (…)` and keeps working without sound if audio can't start. **macOS** needs no setup.
 
@@ -75,10 +77,10 @@ Silent unless started with `--audio`, so it runs on VMs without a sound setup. E
    git clone git@github.com:akskokki/loe-fi.git && cd loe-fi
    npm install
    ```
-3. Let UDP port 7051 through the firewall:
+3. Let port 7051 through the firewall, both UDP (sequencer messages) and TCP (sample files):
    ```bash
-   sudo ufw allow 7051/udp                                   # Ubuntu/Debian with ufw
-   sudo firewall-cmd --add-port=7051/udp                     # Fedora/RHEL (until reboot)
+   sudo ufw allow 7051/udp && sudo ufw allow 7051/tcp        # Ubuntu/Debian with ufw
+   sudo firewall-cmd --add-port=7051/udp --add-port=7051/tcp # Fedora/RHEL (until reboot)
    ```
    On macOS, allow `node` to accept incoming connections if the firewall asks. On macOS 15 and later, also allow your terminal app to access the local network when asked. If you missed the prompt, enable it in System Settings → Privacy & Security → Local Network.
 
@@ -107,7 +109,8 @@ Type these into a running peer:
 | Command | What it does |
 |---|---|
 | `add kick` | Add a track with a preset sound: kick, snare, hat, clap or tom |
-| `t kick 1` | Toggle step 1 of kick (steps are counted from 1) |
+| `add ~/sounds/my cowbell.wav` | Add a track with a sample file; it is named after the file (`my-cowbell`) and the others fetch it |
+| `t kick 1` | Toggle step 1 of kick (steps are counted from 1). If two tracks have the same name, use the start of the key instead, e.g. `t sha256:3f2a 1` |
 | `mute kick`, `unmute kick`, `del kick` | Change a track's status |
 | `play`, `stop`, `bpm 90`, `steps 8` | Playback and settings |
 | `show` | Print the grid, the playhead and the members |
@@ -121,7 +124,8 @@ Type these into a running peer:
 3. **Concurrent edits.** Toggle the same step on two machines at the same moment, or as close as you can. After a second, `show` must print the same grid everywhere.
 4. **Failure.** Quit one peer (`quit` or Ctrl+C). The others print `- member … timed out` after about 5 seconds, and the rest keep syncing.
 5. **Network split.** Run `offline 10` on one peer, which drops all its packets for 10 seconds, and make changes on both sides while it is offline. Both sides time each other out. Within about 5 seconds of it coming back, the members are logged as `back` and every peer has both sides' changes. Turning Wi-Fi off works too.
-6. **Playhead.** After `play`, `show` on different machines should print about the same step. This works only because the computers' clocks are already synced by the OS. The session-time clock sync from the design plan comes later.
+6. **Playhead.** After `play`, `show` on different machines should print the same step, and `show` names the same time reference everywhere. Quit the reference: after about 5 seconds the others elect a new one and keep playing in step.
+7. **Sample files.** Run `add <some audio file>` on one machine. The others log `<- fetching sample …` and `<- got sample …`, and `show` counts it under `sample files held`. Port 7051/tcp has to be open for this (step 3 above).
 
 Known limits:
 

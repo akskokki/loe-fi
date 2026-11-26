@@ -13,6 +13,8 @@ import { PeerNode, chooseName, localAddresses, parseAddress } from './node.js';
 import { MAX_STEPS, addTrack, fingerprint, setSteps, setTrackStatus, toggleCell, updatePlayback, type NodeId, type State } from './state.js';
 import { renderGrid } from './describe.js';
 import { PRESETS, isPreset } from './presets.js';
+import { findTrack, presetKey } from './tracks.js';
+import { addSampleFile } from './addfile.js';
 import { AudioEngine } from './audio.js';
 
 const { values: args } = parseArgs({
@@ -23,6 +25,7 @@ const { values: args } = parseArgs({
     verbose: { type: 'boolean', default: false },
     drop: { type: 'string', default: '0' }, // share of received packets to throw away, e.g. 0.3
     audio: { type: 'boolean', default: false }, // play the grid; off by default so peers on VMs need no sound setup
+    samples: { type: 'string', default: 'samples' }, // folder for sample files; give each peer on one machine its own
   },
 });
 
@@ -38,13 +41,16 @@ const node: PeerNode = new PeerNode({
   join: args.join ? parseAddress(args.join) : undefined,
   verbose: args.verbose,
   drop: Number(args.drop),
+  sampleDir: args.samples,
   log: (s) => console.log(`${new Date().toISOString().slice(11, 23)} [${node.id}] ${s}`),
 });
 
 const HELP = `commands:
-  add <sound>          add a track: ${PRESETS.join(', ')}
-  t <track> <steps>    toggle steps, counted from 1 (e.g. t kick 1, t hihat 1 5 14, t snare 1-4)
+  add <sound>          add a track with a preset: ${PRESETS.join(', ')}
+  add <file>           add a track with a sample file (any audio format, at most 5 MB); others fetch it
+  t <track> <steps>    toggle steps, counted from 1 (e.g. t kick 1, t hat 1 5 14, t snare 1-4)
   mute|unmute|del <track>
+                       a track is named by its name, or by the start of its key if names clash
   play | stop | bpm <n> | steps <n>
   show                 print the grid and the members
   offline <seconds>    drop all packets for a while, to test failures
@@ -64,6 +70,9 @@ function parseSteps(args: string[]): number[] {
 
 function show() {
   for (const l of renderGrid(node.state, node.now())) console.log(`  ${l}`);
+  const missing = Object.entries(node.state.tracks).filter(([k, t]) => t.status.value !== 'deleted' && !node.hasSound(k));
+  if (missing.length > 0) console.log(`  sample files not here yet: ${missing.map(([, t]) => t.name.value).join(', ')}`);
+  console.log(`  sample files held: ${node.store.list().length}`);
   for (const m of node.members()) {
     const seen = m.seenMsAgo === undefined ? '' : `, seen ${m.seenMsAgo} ms ago`;
     console.log(`  member ${m.name} (${m.id}) ${m.address ?? '?'}:${m.port} heartbeat ${m.heartbeat} (${m.status}${seen})`);
@@ -84,16 +93,35 @@ function run(line: string) {
   const [cmd, ...rest] = line.trim().split(/\s+/);
   const now = node.now();
   let change: ((s: State, me: NodeId) => State) | undefined;
+  // The track named in the command, for t, mute, unmute and del.
+  const track = () => {
+    const found = findTrack(node.state, rest[0] ?? '');
+    if ('error' in found) console.log(found.error);
+    return 'key' in found ? found.key : null;
+  };
+  let key: string | null;
   switch (cmd) {
     case '': return;
-    case 'add':
-      if (!isPreset(rest[0] ?? '')) return console.log(`no sound called "${rest[0] ?? ''}"; choose one of: ${PRESETS.join(', ')}`);
-      change = (s, me) => addTrack(s, me, rest[0], rest[0]);
+    case 'add': {
+      const arg = line.trim().slice(3).trim(); // a file path may contain spaces
+      if (isPreset(arg)) {
+        change = (s, me) => addTrack(s, me, presetKey(arg), arg);
+        break;
+      }
+      if (!arg) return console.log(`add what? a preset (${PRESETS.join(', ')}) or a file`);
+      addSampleFile(node, arg).then(
+        ({ note }) => note && console.log(`added, but ${note}`),
+        (err: Error) => console.log(err.message),
+      );
+      return;
+    }
+    case 't':
+      if (!(key = track())) return;
+      change = (s, me) => parseSteps(rest.slice(1)).reduce((acc, step) => toggleCell(acc, me, key!, step), s);
       break;
-    case 't': change = (s, me) => parseSteps(rest.slice(1)).reduce((acc, step) => toggleCell(acc, me, rest[0], step), s); break;
-    case 'mute': change = (s, me) => setTrackStatus(s, me, rest[0], 'muted'); break;
-    case 'unmute': change = (s, me) => setTrackStatus(s, me, rest[0], 'active'); break;
-    case 'del': change = (s, me) => setTrackStatus(s, me, rest[0], 'deleted'); break;
+    case 'mute': if (!(key = track())) return; change = (s, me) => setTrackStatus(s, me, key!, 'muted'); break;
+    case 'unmute': if (!(key = track())) return; change = (s, me) => setTrackStatus(s, me, key!, 'active'); break;
+    case 'del': if (!(key = track())) return; change = (s, me) => setTrackStatus(s, me, key!, 'deleted'); break;
     case 'play': change = (s, me) => updatePlayback(s, me, now, { playing: true }); break;
     case 'stop': change = (s, me) => updatePlayback(s, me, now, { playing: false }); break;
     case 'bpm': if (Number(rest[0]) > 0) change = (s, me) => updatePlayback(s, me, now, { bpm: Number(rest[0]) }); break;
@@ -119,7 +147,7 @@ console.log('type "help" for commands');
 if (args.audio) {
   try {
     const audio = await AudioEngine.open();
-    audio.start(() => node.state, () => node.now());
+    audio.start(() => node.state, () => node.now(), (h) => (node.store.has(h) ? node.store.read(h) : null), (l) => console.log(l));
     console.log(`audio on, output latency ${audio.latencyMs.toFixed(0)} ms`);
   } catch (err) {
     console.log(`audio off: ${(err as Error).message}`);

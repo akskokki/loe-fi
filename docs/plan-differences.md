@@ -83,7 +83,26 @@ Status: **proposed** means it's in the code but the group hasn't confirmed it ye
 
 - **Plan:** members add their own sample files. A track is identified by the hash of its sample, each member lists the samples it holds, and a node missing a sample pulls it from another member over TCP.
 - **Decision:** file sharing stays as planned, and the program also comes with a few preset sounds, so someone starting it for the first time has sounds without any files. Presets need no transfer, since every node has them.
-- **Code so far:** only the presets exist (`src/presets.ts`: kick, snare, hat, clap, tom), and tracks are keyed by preset name. File sharing is not built yet; the `samples` list in member entries was removed for now and comes back with it.
+- **Code:** a track key is either `preset:<name>` (`src/presets.ts`: kick, snare, hat, clap, tom) or `sha256:<hash>` for a sample file (`src/tracks.ts`). Presets are synthesized on each machine, with some random noise in them, so they can't be identified by a hash; they never need transferring anyway.
+
+The file sharing itself follows the plan: samples are stored under their SHA-256 hash (`src/store.ts`), each member lists the hashes it holds in its member entry, and a node pulls a missing sample over TCP from a member that lists it, checks it against the hash, and asks another member if the transfer fails (`src/transfer.ts`). The details the plan leaves open:
+
+### Transfer details · proposed
+
+- **TCP port:** the same number as the node's UDP port, so a member's address in the state is enough to reach both. Firewalls need 7051/tcp open as well.
+- **Protocol:** one request per connection: `GET <hash>`, answered with `OK <length>` and the bytes, `NO` (doesn't have it) or `BUSY`.
+- **Upload limit:** at most 2 uploads at a time, and `BUSY` beyond that, as the plan suggests. A busy holder is asked again after 1 s; one that failed otherwise (timeout, wrong bytes) only after 10 s, other holders first. A random holder is picked each time to spread the uploads.
+- **Downloads:** at most 2 at a time. Samples of deleted tracks are not fetched.
+- **Limits:** 5 MB per file ("a few megabytes" in the plan), any format the audio library decodes. A file is checked to decode as audio when it's added; on a machine where the audio library can't load, it is added with a warning instead.
+
+### Track names are limited to 16 printable characters · proposed
+
+- **Plan:** the figure shows the sample's file name.
+- **Code:** a track's name comes from its file name, without folder and extension, with spaces turned into dashes (so commands can name it) and cut to 16 characters. Like member names, a track name from the network must be 1–16 printable characters, or the STATE is ignored, because names are printed to the terminal and must not carry escape sequences.
+
+### Not done yet
+
+- Sample files are never removed from a node's store, even when no track uses them any more.
 
 ## Playhead synchronization
 

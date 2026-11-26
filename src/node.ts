@@ -10,16 +10,23 @@ import dns from 'node:dns/promises';
 import { EventEmitter } from 'node:events';
 import os from 'node:os';
 import type { Address, Msg } from './messages.js';
-import { MAX_NAME_LENGTH, emptyState, heartbeat, isState, isValidName, memberName, merge, type NodeId, type State } from './state.js';
+import { MAX_NAME_LENGTH, addTrack, emptyState, heartbeat, isState, isValidName, memberName, merge, type NodeId, type State } from './state.js';
 import { describeChanges } from './describe.js';
 import { Clock } from './clock.js';
 import { Election } from './election.js';
+import { SampleStore } from './store.js';
+import { fetchSample, serveSamples } from './transfer.js';
+import { sampleKey, soundOf } from './tracks.js';
+import type net from 'node:net';
 
 const SEND_INTERVAL_MS = 1000;
 const PEER_TIMEOUT_MS = 5000;
 const SYNC_EVERY_MS = 1000; // clock sync requests to the reference; faster until the first few samples
 const SYNC_FAST_MS = 250;
-const RETRY_GONE_EVERY = 5; // also send to gone members on every 5th tick, so a healed network split reconnects
+const RETRY_GONE_EVERY = 5;
+const MAX_DOWNLOADS = 2; // samples fetched at the same time
+const RETRY_HOLDER_MS = 10_000; // after a failed fetch, ask other holders before this one again
+const RETRY_BUSY_MS = 1000; // ... but a holder that was only busy uploading can be asked again soon // also send to gone members on every 5th tick, so a healed network split reconnects
 
 export type MemberStatus = 'me' | 'alive' | 'gone' | 'not heard from';
 export type MemberView = { id: NodeId; name: string; address: string | null; port: number; heartbeat: number; status: MemberStatus; seenMsAgo?: number };
@@ -34,6 +41,8 @@ export type NodeOptions = {
   drop?: number;
   /** Shift this node's local clock by this many ms, to test clock sync with nodes on one machine. */
   clockSkewMs?: number;
+  /** Folder for this node's sample files (default: samples). */
+  sampleDir?: string;
   log: (line: string) => void;
 };
 
@@ -116,6 +125,11 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
   /** Packet counts since start. `dropped` counts packets thrown away by the `drop` option. */
   readonly stats = { sent: 0, received: 0, dropped: 0 };
   readonly clock: Clock;
+  readonly store: SampleStore;
+  private sampleServer: net.Server | undefined;
+  /** Samples being fetched, and per sample the holders that failed and when they may be asked again. */
+  private downloading = new Set<string>();
+  private failedHolders = new Map<string, Map<NodeId, number>>();
   private election: Election;
   private syncTimer: ReturnType<typeof setInterval> | undefined;
   private lastSyncRequest = 0;
@@ -125,6 +139,7 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
     super();
     this.sock.on('message', (buf, rinfo) => this.receive(buf, rinfo));
     this.clock = new Clock(opts.clockSkewMs ?? 0);
+    this.store = new SampleStore(opts.sampleDir ?? 'samples');
     this.election = new Election({
       me: this.id,
       liveMembers: () => this.liveMembers(),
@@ -167,6 +182,8 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
       const { address } = await dns.lookup(this.opts.join.address, { family: 4 });
       this.joinTarget = { address, port: this.opts.join.port };
     }
+    // Sample transfers use TCP on the same port number as the UDP messages.
+    this.sampleServer = await serveSamples(this.store, this.opts.port, (line) => this.log(line));
     return new Promise((resolve, reject) => {
       this.sock.once('error', reject);
       this.sock.bind(this.opts.port, '0.0.0.0', () => {
@@ -180,6 +197,7 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
           this.sendJoin();
           this.broadcast(++tick % RETRY_GONE_EVERY === 0);
           this.election.tick();
+          this.fetchMissing();
         }, SEND_INTERVAL_MS);
         this.syncTimer = setInterval(() => this.requestTime(), SYNC_FAST_MS);
         resolve();
@@ -193,6 +211,7 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
     clearInterval(this.timer);
     clearInterval(this.syncTimer);
     this.election.stop();
+    this.sampleServer?.close();
     this.sock.close();
   }
 
@@ -240,7 +259,61 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
   }
 
   private memberInfo() {
-    return { name: this.opts.name, address: this.myAddress, port: this.opts.port };
+    return { name: this.opts.name, address: this.myAddress, port: this.opts.port, samples: this.store.list() };
+  }
+
+  // --- Samples ---
+
+  /**
+   * Store a sample file's bytes and add a track for it, named `name` (e.g. the file name). The
+   * caller checks that the bytes are audio. Returns the track key; throws if the file is too big.
+   */
+  addSample(bytes: Uint8Array, name: string): string {
+    const hash = this.store.put(bytes);
+    const key = sampleKey(hash);
+    this.edit((s, me) => addTrack(s, me, key, name));
+    return key;
+  }
+
+  /** Whether this node can play a track's sound: presets always, samples once they are stored. */
+  hasSound(key: string): boolean {
+    const sound = soundOf(key);
+    return sound?.kind === 'preset' || (sound?.kind === 'sample' && this.store.has(sound.hash));
+  }
+
+  /** Pull samples of tracks that aren't deleted and that we don't have from members that list them. */
+  private fetchMissing() {
+    const now = Date.now();
+    for (const [key, track] of Object.entries(this.state.tracks)) {
+      const sound = soundOf(key);
+      if (track.status.value === 'deleted' || sound?.kind !== 'sample') continue;
+      const { hash } = sound;
+      if (this.store.has(hash) || this.downloading.has(hash) || this.downloading.size >= MAX_DOWNLOADS) continue;
+      const failed = this.failedHolders.get(hash) ?? new Map<NodeId, number>();
+      const holders = this.liveMembers().filter((id) =>
+        Object.hasOwn(this.state.members, id) && this.state.members[id].value.samples.includes(hash)
+        && now >= (failed.get(id) ?? 0));
+      if (holders.length === 0) continue; // nobody has it, or all holders failed recently: try again later
+      const holder = holders[Math.floor(Math.random() * holders.length)]; // spreads the uploads
+      const addr = this.addressOf(holder);
+      if (!addr) continue;
+      const what = `sample ${track.name.value} (${hash.slice(0, 12)}…)`;
+      const who = memberName(this.state, holder);
+      this.downloading.add(hash);
+      this.log(`<- fetching ${what} from ${who}`);
+      fetchSample(addr.address, addr.port, hash)
+        .then((bytes) => {
+          this.store.put(bytes, hash); // throws if the bytes don't match the hash
+          this.log(`<- got ${what} from ${who}, ${bytes.length} bytes`);
+          this.emit('change');
+        })
+        .catch((err: Error) => {
+          failed.set(holder, Date.now() + (err.message === 'busy' ? RETRY_BUSY_MS : RETRY_HOLDER_MS));
+          this.failedHolders.set(hash, failed);
+          this.log(`fetching ${what} from ${who} failed: ${err.message}; will ask another member`);
+        })
+        .finally(() => this.downloading.delete(hash));
+    }
   }
 
   // --- Sending ---
@@ -362,6 +435,7 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
       for (const line of changes) this.log(`<- ${line}`);
       if (changes.length > 0) this.emit('change');
       this.updateLiveness(Date.now(), msg.from);
+      if (changes.length > 0) this.fetchMissing();
     } else if (msg.type === 'ELECTION' || msg.type === 'ANSWER' || msg.type === 'COORDINATOR') {
       const repeat = msg.type === 'COORDINATOR' && msg.from === this.election.reference; // re-sent every few seconds
       if (!repeat || this.opts.verbose) this.log(`<- ${msg.type} from ${memberName(this.state, msg.from)} (${msg.from})`);

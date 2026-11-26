@@ -6,7 +6,7 @@ import {
 } from './state.js';
 
 const A = 1, B = 2, C = 3;
-const member = (port: number) => ({ name: `peer${port}`, address: '10.0.0.1', port });
+const member = (port: number) => ({ name: `peer${port}`, address: '10.0.0.1', port, samples: [] });
 
 test('the higher version wins, whichever node wrote it', () => {
   let a = addTrack(emptyState(), A, 'kick', 'kick.wav');

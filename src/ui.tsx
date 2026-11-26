@@ -15,6 +15,8 @@ import { render, Box, Text, useApp, useInput } from 'ink';
 import { PeerNode, chooseName, localAddresses, parseAddress, type MemberView } from './node.js';
 import { addTrack, playheadAt, setSteps, setTrackStatus, toggleCell, updatePlayback, type Track } from './state.js';
 import { PRESETS } from './presets.js';
+import { presetKey } from './tracks.js';
+import { addSampleFile } from './addfile.js';
 import { AudioEngine } from './audio.js';
 
 const { values: args } = parseArgs({
@@ -25,6 +27,7 @@ const { values: args } = parseArgs({
     verbose: { type: 'boolean', default: false },
     drop: { type: 'string', default: '0' }, // share of received packets to throw away, e.g. 0.3
     'no-audio': { type: 'boolean', default: false },
+    samples: { type: 'string', default: 'samples' }, // folder for sample files; give each peer on one machine its own
   },
 });
 
@@ -60,6 +63,7 @@ const node: PeerNode = new PeerNode({
   join: args.join ? parseAddress(args.join) : undefined,
   verbose: args.verbose,
   drop: Number(args.drop),
+  sampleDir: args.samples,
   log,
 });
 
@@ -232,6 +236,7 @@ function App() {
   const [cursor, setCursor] = useState({ track: 0, step: 0 });
   const [playhead, setPlayhead] = useState(0);
   const [adding, setAdding] = useState(false); // picking a preset for a new track
+  const [filePath, setFilePath] = useState<string | null>(null); // sample file path being typed, or null
   const [deleting, setDeleting] = useState<string | null>(null); // hash of the track awaiting y/n, or null
 
   // Redraw when the state, a member's liveness or the log changes.
@@ -285,7 +290,7 @@ function App() {
   };
 
   useMouseClicks((x, y) => {
-    if (deleting !== null) return; // answer the y/n question first
+    if (deleting !== null || filePath !== null) return; // answer the question or finish the path first
     const target = hitTest(x, y, controls, tracks.length, steps);
     if (target?.kind === 'action') run(target.action);
     else if (target?.kind === 'track') setCursor((c) => ({ ...c, track: target.track }));
@@ -301,10 +306,27 @@ function App() {
       setDeleting(null); // any other key cancels
       return;
     }
+    if (filePath !== null) {
+      if (key.escape) setFilePath(null);
+      else if (key.return) {
+        const file = filePath.trim().replace(/^~(?=\/)/, process.env.HOME ?? '~');
+        if (file) {
+          log(`adding ${file}…`);
+          addSampleFile(node, file).then(
+            ({ note }) => note && log(`added, but ${note}`),
+            (err: Error) => log(err.message),
+          );
+        }
+        setFilePath(null);
+      } else if (key.backspace || key.delete) setFilePath(filePath.slice(0, -1));
+      else if (input && !key.ctrl && !key.meta && !/[\p{Cc}]/u.test(input)) setFilePath(filePath + input); // typed or pasted text
+      return;
+    }
     if (adding) {
       const preset = PRESETS[Number(input) - 1];
-      if (preset) node.edit((s, me) => addTrack(s, me, preset, preset));
-      setAdding(false); // a number picks a sound, any other key cancels
+      if (preset) node.edit((s, me) => addTrack(s, me, presetKey(preset), preset));
+      else if (input === 'f') setFilePath('');
+      setAdding(false); // a number picks a sound, f asks for a file, any other key cancels
       return;
     }
     const n = Math.max(1, tracks.length);
@@ -366,7 +388,7 @@ function App() {
           <Box key={hash}>
             <Box width={LABEL_WIDTH}>
               <Text bold={i === cur.track} dimColor={muted} wrap="truncate-end">
-                {t.name.value.slice(0, 9).padEnd(9)}{muted ? 'M' : ' '}
+                {t.name.value.slice(0, 9).padEnd(9)}{muted ? 'M' : node.hasSound(hash) ? ' ' : '↓'}
               </Text>
             </Box>
             <StepRow
@@ -394,17 +416,29 @@ function App() {
           <Text>
             Delete track <Text color="red">{state.tracks[deleting]?.name.value}</Text>? <Text dimColor>(y/n)</Text>
           </Text>
+        ) : filePath !== null ? (
+          <Box flexDirection="column">
+            <Box>
+              <Text>Sample file: </Text>
+              {/* a long path loses its start, so the end being typed stays visible */}
+              <Text wrap="truncate-start" color="cyan">{filePath}</Text>
+              <Text inverse> </Text>
+            </Box>
+            <Text dimColor>any audio file up to 5 MB · Enter adds · Esc cancels</Text>
+          </Box>
         ) : adding ? (
           <Text wrap="truncate-end">
             Add a sound:{' '}
             {PRESETS.map((p, i) => {
-              const present = Object.hasOwn(state.tracks, p) && state.tracks[p].status.value !== 'deleted';
+              const k = presetKey(p);
+              const present = Object.hasOwn(state.tracks, k) && state.tracks[k].status.value !== 'deleted';
               return (
                 <Text key={p}>
                   <Text color="yellow" bold>{i + 1}</Text> <Text dimColor={present}>{p}</Text>{'  '}
                 </Text>
               );
             })}
+            <Text color="yellow" bold>f</Text> file…{'  '}
             <Text dimColor>(any other key cancels)</Text>
           </Text>
         ) : (
@@ -472,7 +506,7 @@ let audioOff = 'started with --no-audio';
 if (!args['no-audio']) {
   try {
     audio = await AudioEngine.open();
-    audio.start(() => node.state, () => node.now());
+    audio.start(() => node.state, () => node.now(), (h) => (node.store.has(h) ? node.store.read(h) : null), log);
     log('audio on');
   } catch (err) {
     audioOff = (err as Error).message;

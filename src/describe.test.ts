@@ -27,6 +27,6 @@ test('steps turned on and off, or by different nodes, get separate lines', () =>
 });
 
 test('changes name their author once the author has a member entry', () => {
-  const named = heartbeat(base, 2, { name: 'alice', address: null, port: 7052 });
+  const named = heartbeat(base, 2, { name: 'alice', address: null, port: 7052, samples: [] });
   assert.deepEqual(describeChanges(named, toggle(named, 2, [1])), ['kick step 1 on (by alice)']);
 });

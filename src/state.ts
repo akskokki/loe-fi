@@ -21,6 +21,7 @@
 // All functions are pure: they return a new state and never modify their arguments.
 
 import { createHash } from 'node:crypto';
+import { isHash } from './tracks.js';
 
 export type NodeId = number;
 
@@ -59,6 +60,8 @@ export type MemberInfo = {
   /** Address other nodes can reach this member at; null until the member has learned it (see messages.ts). */
   address: string | null;
   port: number;
+  /** Hashes of the sample files this member holds (see store.ts); others pull missing ones from it. */
+  samples: string[];
 };
 
 export type State = {
@@ -114,7 +117,7 @@ const isReg = (x: any, isValue: (v: any) => boolean) => isObj(x) && isStamp(x.st
 const STATUSES = ['active', 'muted', 'deleted'];
 
 const isTrack = (t: any) =>
-  isObj(t) && isReg(t.name, (v) => typeof v === 'string') && isReg(t.status, (v) => STATUSES.includes(v))
+  isObj(t) && isReg(t.name, isValidName) && isReg(t.status, (v) => STATUSES.includes(v))
   && Array.isArray(t.cells) && t.cells.length === MAX_STEPS && t.cells.every((c: any) => isReg(c, (v) => typeof v === 'boolean'));
 
 export const MAX_NAME_LENGTH = 16;
@@ -129,7 +132,8 @@ export function isValidName(x: unknown): x is string {
 }
 
 const isMember = (m: any) =>
-  isReg(m, (v) => isObj(v) && isValidName(v.name) && (v.address === null || typeof v.address === 'string') && Number.isInteger(v.port));
+  isReg(m, (v) => isObj(v) && isValidName(v.name) && (v.address === null || typeof v.address === 'string') && Number.isInteger(v.port)
+    && Array.isArray(v.samples) && v.samples.every(isHash));
 
 const isPlayback = (p: any) =>
   isObj(p) && typeof p.playing === 'boolean' && typeof p.bpm === 'number' && p.bpm > 0

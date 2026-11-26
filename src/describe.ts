@@ -61,9 +61,10 @@ export function renderGrid(s: State, now: number): string[] {
 
   const row = (cell: (i: number) => string) =>
     Array.from({ length: steps }, (_, i) => cell(i) + (i % 4 === 3 ? ' ' : '')).join('');
+  const width = Math.max(8, ...tracks.map((t) => t.name.value.length)); // names are at most 16 characters
   for (const t of tracks) {
-    lines.push(`${t.name.value.padEnd(8)} ${t.status.value.padEnd(7)} ${row((i) => (t.cells[i].value ? 'x' : '.'))}`);
+    lines.push(`${t.name.value.padEnd(width)} ${t.status.value.padEnd(7)} ${row((i) => (t.cells[i].value ? 'x' : '.'))}`);
   }
-  lines.push(`${''.padEnd(17)}${row((i) => (i === head ? '^' : ' '))}`);
+  lines.push(`${''.padEnd(width + 9)}${row((i) => (i === head ? '^' : ' '))}`);
   return lines;
 }

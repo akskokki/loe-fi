@@ -27,8 +27,8 @@ test('every hit is heard exactly at its step\'s session time, once', async () =>
   const { ctx, starts, origin } = fakeContext(latency);
   // Session time runs 12 345 ms ahead of this machine's clock, as after syncing to a reference.
   const now = () => performance.timeOrigin + performance.now() + 12_345;
-  let s = addTrack(emptyState(), 1, 'kick', 'kick');
-  for (const step of [0, 2, 4, 6]) s = toggleCell(s, 1, 'kick', step);
+  let s = addTrack(emptyState(), 1, 'preset:kick', 'kick');
+  for (const step of [0, 2, 4, 6]) s = toggleCell(s, 1, 'preset:kick', step);
   const at = now() + 200; // start a little in the future
   s = updatePlayback(s, 1, at, { playing: true });
   s = { ...s, playback: { ...s.playback, value: { ...s.playback.value, at } } };
