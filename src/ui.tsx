@@ -74,8 +74,12 @@ const BANNER = [
   ' ██▄▄▄▄▄▄  ▀██████▀          ██        ██  ♪ ♫',
 ];
 const BANNER_COLORS = ['magenta', 'magenta', 'magentaBright', 'cyan', 'cyanBright'];
-const CONTROLS_ROW = BANNER.length + 2; // banner, title, blank, controls
-const TRACKS_ROW = CONTROLS_ROW + 3; // blank, step numbers, then one row per track
+const CONTROLS_ROW = BANNER.length + 2; // banner, title, blank, then the control rows
+const CONTROL_ROW_STEP = 2; // each control row is followed by a blank line
+const CONTROL_ROWS = 2;
+// control rows with blank lines between, blank, step numbers, then one row per track
+const TRACKS_ROW = CONTROLS_ROW + (CONTROL_ROWS - 1) * CONTROL_ROW_STEP + 3;
+const CONTROL_LABEL_WIDTH = 10; // "Playback" / "Tracks" in front of each control row
 const LABEL_WIDTH = 11; // track name (9) + mute marker + space
 const CELL_WIDTH = 3; // "[■]"
 const GROUP_WIDTH = 4 * CELL_WIDTH + 1; // four cells and a space
@@ -90,25 +94,34 @@ function stepAt(x: number): number | null {
 type Action = 'play' | 'bpmDown' | 'bpmUp' | 'stepsDown' | 'stepsUp' | 'add' | 'mute' | 'delete' | 'quit';
 type Segment = { text: string; action?: Action; color?: string };
 
-function controlSegments(playing: boolean, bpm: number, steps: number): Segment[] {
+/**
+ * The control buttons, one array per row, each starting with a label: the session's playback
+ * settings (and leaving the session) first, then the actions on tracks.
+ */
+function controlRows(playing: boolean, bpm: number, steps: number): Segment[][] {
   return [
-    { text: playing ? ' Stop ' : ' Play ', action: 'play', color: playing ? 'red' : 'green' },
-    { text: '  BPM ' },
-    { text: ' - ', action: 'bpmDown', color: 'blue' },
-    { text: ` ${String(bpm).padStart(3)} ` },
-    { text: ' + ', action: 'bpmUp', color: 'blue' },
-    { text: '  Steps ' },
-    { text: ' - ', action: 'stepsDown', color: 'blue' },
-    { text: ` ${String(steps).padStart(2)} ` },
-    { text: ' + ', action: 'stepsUp', color: 'blue' },
-    { text: '  ' },
-    { text: ' Add track ', action: 'add', color: 'cyan' },
-    { text: ' ' },
-    { text: ' Mute ', action: 'mute', color: 'magenta' },
-    { text: ' ' },
-    { text: ' Delete ', action: 'delete', color: 'red' },
-    { text: '  ' },
-    { text: ' Quit ', action: 'quit', color: 'gray' },
+    [
+      { text: 'Playback'.padEnd(CONTROL_LABEL_WIDTH) },
+      { text: playing ? ' Stop ' : ' Play ', action: 'play', color: playing ? 'red' : 'green' },
+      { text: '   BPM ' },
+      { text: ' - ', action: 'bpmDown', color: 'blue' },
+      { text: ` ${String(bpm).padStart(3)} ` },
+      { text: ' + ', action: 'bpmUp', color: 'blue' },
+      { text: '   Steps ' },
+      { text: ' - ', action: 'stepsDown', color: 'yellow' },
+      { text: ` ${String(steps).padStart(2)} ` },
+      { text: ' + ', action: 'stepsUp', color: 'yellow' },
+      { text: '   ' },
+      { text: ' Quit ', action: 'quit', color: 'gray' },
+    ],
+    [
+      { text: 'Tracks'.padEnd(CONTROL_LABEL_WIDTH) },
+      { text: ' Add track ', action: 'add', color: 'cyan' },
+      { text: ' ' },
+      { text: ' Mute ', action: 'mute', color: 'magenta' },
+      { text: ' ' },
+      { text: ' Delete ', action: 'delete', color: 'red' },
+    ],
   ];
 }
 
@@ -133,12 +146,14 @@ type Target =
   | { kind: 'track'; track: number };
 
 // x, y are the terminal's 1-based mouse coordinates.
-function hitTest(x: number, y: number, segments: Segment[], trackCount: number, steps: number): Target | null {
+function hitTest(x: number, y: number, rows: Segment[][], trackCount: number, steps: number): Target | null {
   const cx = x - 1 - PAD;
   const cy = y - 1 - PAD;
-  if (cy === CONTROLS_ROW) {
+  const offset = cy - CONTROLS_ROW;
+  const row = offset % CONTROL_ROW_STEP === 0 ? rows[offset / CONTROL_ROW_STEP] : undefined;
+  if (offset >= 0 && row) {
     let start = 0;
-    for (const seg of segments) {
+    for (const seg of row) {
       if (seg.action && cx >= start && cx < start + seg.text.length) return { kind: 'action', action: seg.action };
       start += seg.text.length;
     }
@@ -245,7 +260,7 @@ function App() {
     step: Math.min(cursor.step, steps - 1),
   };
   const selected = tracks[cur.track];
-  const segments = controlSegments(playing, bpm, steps);
+  const controls = controlRows(playing, bpm, steps);
 
   const toggle = (track: number, step: number) => {
     const t = tracks[track];
@@ -271,7 +286,7 @@ function App() {
 
   useMouseClicks((x, y) => {
     if (deleting !== null) return; // answer the y/n question first
-    const target = hitTest(x, y, segments, tracks.length, steps);
+    const target = hitTest(x, y, controls, tracks.length, steps);
     if (target?.kind === 'action') run(target.action);
     else if (target?.kind === 'track') setCursor((c) => ({ ...c, track: target.track }));
     else if (target?.kind === 'cell') {
@@ -329,11 +344,15 @@ function App() {
       <Text bold wrap="truncate-end">
         Lö-Fi · {node.opts.name} · others join with --join {reachable}:{args.port}
       </Text>
-      <Box marginTop={1}>
-        {segments.map((seg, i) => (
-          <Text key={i} inverse={!!seg.action} color={seg.color}>
-            {seg.text}
-          </Text>
+      <Box marginTop={1} flexDirection="column">
+        {controls.map((row, r) => (
+          <Box key={r} marginTop={r > 0 ? CONTROL_ROW_STEP - 1 : 0}>
+            {row.map((seg, i) => (
+              <Text key={i} inverse={!!seg.action} color={seg.color}>
+                {seg.text}
+              </Text>
+            ))}
+          </Box>
         ))}
       </Box>
       <Box marginTop={1}>
