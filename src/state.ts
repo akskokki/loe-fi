@@ -19,6 +19,8 @@
 //
 // All functions are pure: they return a new state and never modify their arguments.
 
+import { createHash } from 'node:crypto';
+
 export type NodeId = number;
 
 /** Version stamp <version, node ID>. Version 0 means the value was never set. */
@@ -217,6 +219,27 @@ export function heartbeat(s: State, me: NodeId, info: MemberInfo): State {
 }
 
 // --- Derived values ---
+
+/** JSON with object keys sorted, so equal values always give the same text. */
+function canonical(x: unknown): string {
+  if (Array.isArray(x)) return `[${x.map(canonical).join(',')}]`;
+  if (typeof x === 'object' && x !== null) {
+    const keys = Object.keys(x).sort();
+    return `{${keys.map((k) => `${JSON.stringify(k)}:${canonical((x as Record<string, unknown>)[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(x);
+}
+
+/**
+ * A short hash of everything in the state that must converge: settings, playback, tracks, and the
+ * set of members with their names. Member heartbeats are left out because they keep changing while
+ * nodes run. Two nodes with the same fingerprint have the same sequencer state.
+ */
+export function fingerprint(s: State): string {
+  const members = Object.entries(s.members).map(([id, m]) => [id, m.value.name]).sort();
+  const shared = { settings: s.settings, playback: s.playback, tracks: s.tracks, members };
+  return createHash('sha256').update(canonical(shared)).digest('hex').slice(0, 12);
+}
 
 /** A member's display name, or its node ID if it has no entry (yet). */
 export function memberName(s: State, id: NodeId): string {

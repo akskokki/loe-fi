@@ -49,10 +49,10 @@ Status: **proposed** means it's in the code but the group hasn't confirmed it ye
 
 ## Messages
 
-### STATE carries a `to` field, and nodes learn their own address from it · proposed
+### STATE and JOIN carry a `to` field, and nodes learn their own address from it · proposed
 
 - **Plan:** the STATE header is the sender's node ID. The member entry holds the node's address, but the plan doesn't say how a node knows it.
-- **Code:** STATE is `{type, from, to, state}` (`src/messages.ts`). `to` is the address the sender sent the message to. The receiver writes it into its own member entry, preferring a non-loopback address once it has seen one. The address is `null` until the node has learned it.
+- **Code:** STATE is `{type, from, to, state}` and JOIN is `{type, from, to}` (`src/messages.ts`). `to` is the address the sender sent the message to, so a node learns its address from the first JOIN or STATE it gets. The receiver writes it into its own member entry, preferring a non-loopback address once it has seen one. The address is `null` until the node has learned it.
 - **Why:** a node often can't tell which of its addresses others can reach it at, because of several network interfaces, VMs or Docker.
 - **Also:** for nodes that have sent us packets, we send to the address their packets come from, not the address in their member entry.
 

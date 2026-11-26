@@ -21,6 +21,7 @@ const { values: args } = parseArgs({
     join: { type: 'string' },
     name: { type: 'string' },
     verbose: { type: 'boolean', default: false },
+    drop: { type: 'string', default: '0' }, // share of received packets to throw away, e.g. 0.3
   },
 });
 
@@ -55,6 +56,7 @@ const node: PeerNode = new PeerNode({
   port: Number(args.port),
   join: args.join ? parseAddress(args.join) : undefined,
   verbose: args.verbose,
+  drop: Number(args.drop),
   log,
 });
 

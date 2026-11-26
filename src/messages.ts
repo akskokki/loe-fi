@@ -5,8 +5,11 @@ import type { NodeId, State } from './state.js';
 export type Address = { address: string; port: number };
 
 export type Msg =
-  /** Sent by a node that wants to join a session, to one member. Answered with a STATE. */
-  | { type: 'JOIN'; from: NodeId }
+  /**
+   * Sent by a node that wants to join a session, to one member. Answered with a STATE. `to` works
+   * as in STATE, so the member learns its own address from the first JOIN it gets.
+   */
+  | { type: 'JOIN'; from: NodeId; to: Address }
   /**
    * The sender's whole state. Sent to every member after each local change and at a fixed
    * interval, and in reply to a JOIN.

@@ -5,10 +5,11 @@
 //   npm run peer -- --port 7052 --join 127.0.0.1:7051   second peer on the same machine
 //   add --name alice to show a name to the others (default: your OS user name)
 //   add --verbose to log every STATE message sent and received
+//   add --drop 0.3 to throw away 30% of received packets (a lossy network)
 import readline from 'node:readline';
 import { parseArgs } from 'node:util';
 import { PeerNode, chooseName, localAddresses, parseAddress } from './node.js';
-import { MAX_STEPS, addTrack, setSteps, setTrackStatus, toggleCell, updatePlayback, type NodeId, type State } from './state.js';
+import { MAX_STEPS, addTrack, fingerprint, setSteps, setTrackStatus, toggleCell, updatePlayback, type NodeId, type State } from './state.js';
 import { renderGrid } from './describe.js';
 
 const { values: args } = parseArgs({
@@ -17,6 +18,7 @@ const { values: args } = parseArgs({
     join: { type: 'string' },
     name: { type: 'string' },
     verbose: { type: 'boolean', default: false },
+    drop: { type: 'string', default: '0' }, // share of received packets to throw away, e.g. 0.3
   },
 });
 
@@ -31,6 +33,7 @@ const node: PeerNode = new PeerNode({
   port: Number(args.port),
   join: args.join ? parseAddress(args.join) : undefined,
   verbose: args.verbose,
+  drop: Number(args.drop),
   log: (s) => console.log(`${new Date().toISOString().slice(11, 23)} [${node.id}] ${s}`),
 });
 
@@ -61,6 +64,9 @@ function show() {
     const seen = m.seenMsAgo === undefined ? '' : `, seen ${m.seenMsAgo} ms ago`;
     console.log(`  member ${m.name} (${m.id}) ${m.address ?? '?'}:${m.port} heartbeat ${m.heartbeat} (${m.status}${seen})`);
   }
+  // Same fingerprint on two peers = same sequencer state. Packet counts include the --drop losses.
+  const { sent, received, dropped } = node.stats;
+  console.log(`  state fingerprint ${fingerprint(node.state)} · packets sent ${sent}, received ${received}, dropped ${dropped}`);
 }
 
 function run(line: string) {

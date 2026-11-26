@@ -6,6 +6,7 @@
 // Each send bumps the version of the node's own member entry, which is its heartbeat. A member
 // whose heartbeat has not increased for PEER_TIMEOUT_MS is considered gone.
 import dgram from 'node:dgram';
+import dns from 'node:dns/promises';
 import { EventEmitter } from 'node:events';
 import os from 'node:os';
 import type { Address, Msg } from './messages.js';
@@ -25,6 +26,8 @@ export type NodeOptions = {
   port: number;
   join?: Address;
   verbose?: boolean;
+  /** Share of received packets to throw away (0..1), to simulate a lossy network. */
+  drop?: number;
   log: (line: string) => void;
 };
 
@@ -61,8 +64,8 @@ const isLoopback = (a: string) => a.startsWith('127.') || a === 'localhost';
 /** Shape check, so a packet from an older version of this program is reported instead of crashing us or spreading. */
 function wellFormed(m: any): m is Msg {
   if (typeof m !== 'object' || m === null || typeof m.from !== 'number') return false;
-  if (m.type === 'JOIN') return true;
-  return m.type === 'STATE' && typeof m.to?.address === 'string' && Number.isInteger(m.to.port) && isState(m.state);
+  if (typeof m.to?.address !== 'string' || !Number.isInteger(m.to.port)) return false;
+  return m.type === 'JOIN' || (m.type === 'STATE' && isState(m.state));
 }
 
 /** Emits 'change' whenever the state or a member's liveness changes. */
@@ -80,6 +83,11 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
   /** Until this time, drop all packets in both directions (for testing failures). */
   private offlineUntil = 0;
   private timer: ReturnType<typeof setInterval> | undefined;
+  /** The --join address, resolved, and whether it has answered yet. */
+  private joinTarget: Address | undefined;
+  private joined = false;
+  /** Packet counts since start. `dropped` counts packets thrown away by the `drop` option. */
+  readonly stats = { sent: 0, received: 0, dropped: 0 };
 
   constructor(readonly opts: NodeOptions) {
     super();
@@ -91,8 +99,13 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
     return Date.now();
   }
 
-  /** Bind the socket and start the heartbeat. Rejects if the port is taken. */
-  start(): Promise<void> {
+  /** Bind the socket and start the heartbeat. Rejects if the port is taken or the join host is unknown. */
+  async start(): Promise<void> {
+    if (this.opts.join) {
+      // Resolve a host name once, so replies from it can be recognised by their address.
+      const { address } = await dns.lookup(this.opts.join.address, { family: 4 });
+      this.joinTarget = { address, port: this.opts.join.port };
+    }
     return new Promise((resolve, reject) => {
       this.sock.once('error', reject);
       this.sock.bind(this.opts.port, '0.0.0.0', () => {
@@ -169,6 +182,7 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
     if (this.offline()) return;
     const data = JSON.stringify(msg);
     if (this.opts.verbose) this.log(`-> ${msg.type} to ${to.address}:${to.port} (${data.length} bytes)`);
+    this.stats.sent++;
     this.sock.send(data, to.port, to.address, (err) => {
       if (err) this.log(`send to ${to.address}:${to.port} failed: ${err.message}`);
     });
@@ -178,24 +192,29 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
     this.send({ type: 'STATE', from: this.id, to, state: this.state }, to);
   }
 
-  // Keep sending JOIN until some member is alive, in case the other side starts later or a packet is lost.
+  // Keep sending JOIN until the node we join has answered, in case it starts later or a packet is lost.
+  // Other live members don't count: they may have joined through us before we reached the session.
   private sendJoin() {
-    const target = this.opts.join;
-    if (!target || [...this.liveness.values()].some((l) => l.alive)) return;
+    const target = this.joinTarget;
+    if (!target || this.joined) return;
     this.log(`-> JOIN to ${target.address}:${target.port}`);
-    this.send({ type: 'JOIN', from: this.id }, target);
+    this.send({ type: 'JOIN', from: this.id, to: target }, target);
   }
 
-  /** Addresses of the live members (and the gone ones too if asked), plus the join target until we know any member. */
+  /** Addresses of the live and just-learned members (and the gone ones too if asked), plus the join target until we know any member. */
   private targets(includeGone: boolean): Address[] {
     const out = new Map<string, Address>();
     for (const [key, entry] of Object.entries(this.state.members)) {
       const id = Number(key);
-      if (id === this.id || !(includeGone || this.liveness.get(id)?.alive)) continue;
+      const l = this.liveness.get(id);
+      // A member we only just learned about from someone else gets our STATE for a few seconds, so
+      // it can answer directly instead of us waiting for its heartbeat to move in gossip.
+      const justLearned = l !== undefined && !l.everAlive && Date.now() - l.changedAt < PEER_TIMEOUT_MS;
+      if (id === this.id || !(includeGone || l?.alive || justLearned)) continue;
       const addr = this.observed.get(id) ?? (entry.value.address ? { address: entry.value.address, port: entry.value.port } : null);
       if (addr) out.set(`${addr.address}:${addr.port}`, addr);
     }
-    if (out.size === 0 && this.opts.join) out.set('join', this.opts.join);
+    if (out.size === 0 && this.joinTarget) out.set('join', this.joinTarget);
     return [...out.values()];
   }
 
@@ -209,6 +228,11 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
 
   private receive(buf: Buffer, rinfo: dgram.RemoteInfo) {
     if (this.offline()) return;
+    if (this.opts.drop && Math.random() < this.opts.drop) {
+      this.stats.dropped++;
+      return;
+    }
+    this.stats.received++;
     const where = `${rinfo.address}:${rinfo.port}`;
     let msg: unknown;
     try {
@@ -234,16 +258,18 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
 
     if (msg.type === 'JOIN') {
       this.log(`<- JOIN from ${msg.from} (${from.address}:${from.port})`);
+      this.learnAddress(msg.to);
       this.sendState(from);
     } else if (msg.type === 'STATE') {
       if (this.opts.verbose) this.log(`<- STATE from ${msg.from} (${from.address}:${from.port}, ${bytes} bytes)`);
+      if (!this.joined && this.joinTarget?.address === from.address && this.joinTarget.port === from.port) this.joined = true;
       this.learnAddress(msg.to);
       const before = this.state;
       this.state = merge(this.state, msg.state);
       const changes = describeChanges(before, this.state);
       for (const line of changes) this.log(`<- ${line}`);
       if (changes.length > 0) this.emit('change');
-      this.updateLiveness(Date.now());
+      this.updateLiveness(Date.now(), msg.from);
     }
   }
 
@@ -252,9 +278,11 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
     if (to.address === this.myAddress || (this.myAddress && !isLoopback(this.myAddress) && isLoopback(to.address))) return;
     this.log(`others reach me at ${to.address}:${this.opts.port}`);
     this.myAddress = to.address;
+    this.state = heartbeat(this.state, this.id, this.memberInfo()); // so the next message carries it
   }
 
-  private updateLiveness(now: number) {
+  /** `heardFrom` is a node whose STATE just arrived directly: that alone proves it is alive. */
+  private updateLiveness(now: number, heardFrom?: NodeId) {
     let changed = false;
     for (const [key, entry] of Object.entries(this.state.members)) {
       const id = Number(key);
@@ -262,7 +290,13 @@ export class PeerNode extends EventEmitter<{ change: [] }> {
       const ver = entry.stamp.ver;
       const known = this.liveness.get(id);
       const where = `${memberName(this.state, id)} (${id}, ${entry.value.address ?? '?'}:${entry.value.port})`;
-      if (!known) {
+      if (id === heardFrom && !(known?.alive && ver <= known.ver)) {
+        if (!known?.alive) {
+          this.log(`+ member ${where}${known?.everAlive ? ' is back' : ''}`);
+          changed = true;
+        }
+        this.liveness.set(id, { ver, changedAt: now, alive: true, everAlive: true });
+      } else if (!known) {
         // Seeing an entry proves nothing: member entries are never removed, so this may be a peer
         // that quit long ago, e.g. our own previous run on this machine. Wait for its heartbeat to move.
         this.liveness.set(id, { ver, changedAt: now, alive: false, everAlive: false });

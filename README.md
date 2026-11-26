@@ -13,8 +13,20 @@ Real-time multiplayer drum sequencer. Design: [docs/design-plan.tex](docs/design
 | `src/peer.ts` | Headless peer that takes typed commands (`npm run peer`), for VMs and scripted tests |
 | `src/describe.ts` | Log lines for what changed, and the grid as text |
 | `src/state.test.ts` | Tests for the merge rule (`npm test`) |
+| `src/harness.ts` | Convergence test over the network code (`npm run harness`) |
 
 `npm test` runs the tests, `npm run check` type-checks.
+
+## Convergence test harness
+
+```bash
+npm run harness                                              # 5 peers, 10 s of edits, 30% packet loss
+npm run harness -- --peers 8 --seconds 20 --drop 0.5 --outage 6
+```
+
+Starts several peers on this machine, each joining a random earlier peer, and lets every peer make random edits (mostly toggling the same few cells, so edits conflict) while each throws away the given share of the packets it receives. With `--outage`, one peer goes offline for that many seconds in the middle. When the edits stop, the harness waits until every peer has the same state fingerprint and sees all the others alive, prints a table and exits with 0. If that doesn't happen within 30 s, it prints FAILED and exits with 1. Every peer's log goes to `logs/harness-<time>.log`. `--seed` repeats the same edits; packet loss stays random.
+
+The headless peer and the UI also take `--drop 0.3`, and `show` prints the state fingerprint, so you can compare peers on different machines.
 
 ## Terminal UI
 
